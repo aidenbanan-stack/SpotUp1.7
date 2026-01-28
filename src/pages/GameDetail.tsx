@@ -84,21 +84,13 @@ export default function GameDetail() {
     }
   };
 
-  const handleOpenLive = () => {
-    navigate(`/game/${game.id}/live`);
-  };
-
-  const handleOpenPostGame = () => {
-    navigate(`/game/${game.id}/postgame`);
-  };
-
   const handleShare = () => {
     navigator.clipboard.writeText(window.location.href);
     toast.success('Link copied to clipboard!');
   };
 
   return (
-    <div className="min-h-screen bg-background pb-40 safe-top">
+    <div className="min-h-screen bg-background pb-[220px] md:pb-[260px] safe-top">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/50">
         <div className="flex items-center justify-between px-4 py-3">
@@ -147,10 +139,7 @@ export default function GameDetail() {
 
         {/* Host Info */}
         {game.host && (
-          <section
-            className="glass-card p-4 flex items-center gap-4 animate-fade-in"
-            style={{ animationDelay: '50ms' }}
-          >
+          <section className="glass-card p-4 flex items-center gap-4 animate-fade-in" style={{ animationDelay: '50ms' }}>
             <img
               src={game.host.profilePhotoUrl}
               alt={game.host.username}
@@ -234,7 +223,6 @@ export default function GameDetail() {
             PLAYERS ({game.playerIds.length}/{game.maxPlayers})
           </h3>
 
-          {/* Make this grid so it never overflows weirdly */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {game.players?.map((player) => (
               <div key={player.id} className="flex items-center gap-2 glass-card p-2 pr-4">
@@ -248,10 +236,7 @@ export default function GameDetail() {
             ))}
 
             {Array.from({ length: Math.max(0, game.maxPlayers - game.playerIds.length) }).map((_, i) => (
-              <div
-                key={`empty-${i}`}
-                className="flex items-center gap-2 glass-card p-2 pr-4 opacity-50"
-              >
+              <div key={`empty-${i}`} className="flex items-center gap-2 glass-card p-2 pr-4 opacity-50">
                 <div className="w-8 h-8 rounded-full bg-muted" />
                 <span className="text-sm text-muted-foreground">Open spot</span>
               </div>
@@ -261,7 +246,7 @@ export default function GameDetail() {
       </main>
 
       {/* Action Bar */}
-      <div className="fixed left-0 right-0 bottom-16 sm:bottom-6 z-50 px-4 safe-bottom">
+      <div className="fixed left-0 right-0 bottom-24 md:bottom-28 z-50 px-4 safe-bottom">
         <div className="mx-auto max-w-3xl">
           <div className="bg-background/70 backdrop-blur-xl border border-border/50 rounded-2xl p-3 shadow-lg">
             {isHost ? (
