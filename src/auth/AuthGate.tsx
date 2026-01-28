@@ -19,59 +19,68 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
+    const loadProfile = async () => {
+      try {
+        const profile = await getOrCreateMyProfile();
+        if (mounted) setUser(profile);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("[Supabase] profile load failed:", e);
+      }
+    };
+
     supabase.auth
       .getSession()
-      .then(async ({ data, error }) => {
+      .then(({ data, error }) => {
         if (!mounted) return;
+
         if (error) {
           // eslint-disable-next-line no-console
           console.warn("[Supabase] getSession error:", error.message);
         }
+
         const sessionExists = Boolean(data.session);
         setHasSession(sessionExists);
 
-        if (sessionExists) {
-          try {
-            const profile = await getOrCreateMyProfile();
-            if (mounted) setUser(profile);
-          } catch (e) {
-            // eslint-disable-next-line no-console
-            console.warn('[Supabase] profile load failed:', e);
-          }
-        } else {
+        // Key change: do NOT block the UI on profile load
+        setLoading(false);
+
+        if (!sessionExists) {
           setUser(null);
+          return;
         }
 
-        setLoading(false);
+        // Load profile in background
+        void loadProfile();
       })
       .catch((err) => {
         // eslint-disable-next-line no-console
         console.warn("[Supabase] getSession threw:", err);
         setUser(null);
+        setHasSession(false);
         setLoading(false);
       });
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+
       const sessionExists = Boolean(session);
       setHasSession(sessionExists);
+
       if (!sessionExists) {
         setUser(null);
         return;
       }
-      try {
-        const profile = await getOrCreateMyProfile();
-        setUser(profile);
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn('[Supabase] profile load failed:', e);
-      }
+
+      // Profile load should not block UI
+      void loadProfile();
     });
 
     return () => {
       mounted = false;
       sub.subscription.unsubscribe();
     };
-  }, []);
+  }, [setUser]);
 
   if (loading) {
     return (
