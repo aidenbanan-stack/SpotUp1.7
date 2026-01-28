@@ -66,7 +66,10 @@ export async function fetchGames(): Promise<Game[]> {
   return (data as GameRow[]).map(rowToGame);
 }
 
-export type CreateGameInput = Omit<Game, 'id' | 'createdAt' | 'host' | 'players' | 'postGameVotes' | 'completedAt'>;
+export type CreateGameInput = Omit<
+  Game,
+  'id' | 'createdAt' | 'host' | 'players' | 'postGameVotes' | 'completedAt'
+>;
 
 export async function createGame(input: CreateGameInput): Promise<Game> {
   const insertRow = {
@@ -102,68 +105,38 @@ export async function createGame(input: CreateGameInput): Promise<Game> {
   return rowToGame(data as GameRow);
 }
 
-export async function joinGame(gameId: string, userId: string, isPrivate: boolean): Promise<Game> {
-  // Fetch current arrays first.
-  const { data: existing, error: fetchError } = await supabase
-    .from('games')
-    .select('player_ids,pending_request_ids,is_private')
-    .eq('id', gameId)
-    .single();
+/**
+ * SECURE JOIN / LEAVE / CHECK-IN
+ * These call Postgres RPC functions that enforce permissions via auth.uid().
+ * Do not trust client-provided userId or isPrivate.
+ */
 
-  if (fetchError) throw fetchError;
-
-  const playerIds: string[] = (existing?.player_ids as string[]) ?? [];
-  const pendingIds: string[] = (existing?.pending_request_ids as string[]) ?? [];
-
-  let nextPlayerIds = playerIds;
-  let nextPendingIds = pendingIds;
-
-  if (isPrivate) {
-    if (!pendingIds.includes(userId)) nextPendingIds = [...pendingIds, userId];
-  } else {
-    if (!playerIds.includes(userId)) nextPlayerIds = [...playerIds, userId];
-  }
-
+export async function joinGame(
+  gameId: string,
+  _userId: string,
+  _isPrivate: boolean
+): Promise<Game> {
   const { data, error } = await supabase
-    .from('games')
-    .update({ player_ids: nextPlayerIds, pending_request_ids: nextPendingIds })
-    .eq('id', gameId)
-    .select('*')
+    .rpc('join_or_request_game', { p_game_id: gameId })
     .single();
 
   if (error) throw error;
   return rowToGame(data as GameRow);
 }
 
-export async function leaveGame(gameId: string, userId: string): Promise<Game> {
-  const { data: existing, error: fetchError } = await supabase
-    .from('games')
-    .select('player_ids,pending_request_ids')
-    .eq('id', gameId)
-    .single();
-
-  if (fetchError) throw fetchError;
-
-  const playerIds: string[] = (existing?.player_ids as string[]) ?? [];
-  const pendingIds: string[] = (existing?.pending_request_ids as string[]) ?? [];
-
-  const nextPlayerIds = playerIds.filter((id) => id !== userId);
-  const nextPendingIds = pendingIds.filter((id) => id !== userId);
-
+export async function leaveGame(gameId: string, _userId: string): Promise<Game> {
   const { data, error } = await supabase
-    .from('games')
-    .update({ player_ids: nextPlayerIds, pending_request_ids: nextPendingIds })
-    .eq('id', gameId)
-    .select('*')
+    .rpc('leave_game', { p_game_id: gameId })
     .single();
 
   if (error) throw error;
   return rowToGame(data as GameRow);
 }
 
-
-// Live game + postgame updates (prototype-friendly, not fully atomic).
-export async function setGameStatus(gameId: string, status: 'scheduled' | 'live' | 'finished'): Promise<Game> {
+export async function setGameStatus(
+  gameId: string,
+  status: 'scheduled' | 'live' | 'finished'
+): Promise<Game> {
   const { data, error } = await supabase
     .from('games')
     .update({ status })
@@ -175,25 +148,13 @@ export async function setGameStatus(gameId: string, status: 'scheduled' | 'live'
   return rowToGame(data as GameRow);
 }
 
-export async function toggleCheckIn(gameId: string, userId: string, checkedIn: boolean): Promise<Game> {
-  const { data: existing, error: fetchError } = await supabase
-    .from('games')
-    .select('checked_in_ids')
-    .eq('id', gameId)
-    .single();
-
-  if (fetchError) throw fetchError;
-
-  const checkedInIds: string[] = (existing?.checked_in_ids as string[]) ?? [];
-  const next = checkedIn
-    ? Array.from(new Set([...checkedInIds, userId]))
-    : checkedInIds.filter((id) => id !== userId);
-
+export async function toggleCheckIn(
+  gameId: string,
+  _userId: string,
+  checkedIn: boolean
+): Promise<Game> {
   const { data, error } = await supabase
-    .from('games')
-    .update({ checked_in_ids: next })
-    .eq('id', gameId)
-    .select('*')
+    .rpc('toggle_check_in', { p_game_id: gameId, p_checked_in: checkedIn })
     .single();
 
   if (error) throw error;
@@ -224,7 +185,13 @@ export async function endGame(gameId: string): Promise<Game> {
   return rowToGame(data as GameRow);
 }
 
-type PostGameVoteCategory = 'best_shooter' | 'best_passer' | 'best_all_around' | 'best_scorer' | 'best_defender';
+type PostGameVoteCategory =
+  | 'best_shooter'
+  | 'best_passer'
+  | 'best_all_around'
+  | 'best_scorer'
+  | 'best_defender';
+
 type PostGameVotes = Record<PostGameVoteCategory, Record<string, number>>;
 type PostGameVoters = Record<string, Partial<Record<PostGameVoteCategory, string>>>;
 
