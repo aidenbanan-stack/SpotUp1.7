@@ -17,7 +17,7 @@ import { createGame } from '@/lib/gamesApi';
 export default function CreateGame() {
   const navigate = useNavigate();
   const { user, games, setGames } = useApp();
-  
+
   const [sport, setSport] = useState<Sport[]>(user?.primarySport ? [user.primarySport] : []);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -35,29 +35,38 @@ export default function CreateGame() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    // Profile must be loaded to create a game correctly.
+    if (!user) {
+      toast.error('Your profile is still loading. Try again in a moment.');
+      return;
+    }
+
     if (sport.length === 0) {
       toast.error('Please select a sport');
       return;
     }
+
     if (!title || !date || !time || !location.areaName) {
       toast.error('Please fill in all required fields');
       return;
     }
 
+    const prevGames = games;
+
     const optimisticGame: Game = {
       id: String(Date.now()),
-      hostId: user?.id || '1',
-      host: user || undefined,
+      hostId: user.id,
+      host: user,
       sport: sport[0],
       title,
       description,
       dateTime: new Date(`${date}T${time}`),
-      duration: parseInt(duration),
+      duration: parseInt(duration, 10),
       skillRequirement: skillLevel,
       maxPlayers,
-      playerIds: [user?.id || '1'],
-      players: user ? [user] : [],
+      playerIds: [user.id],
+      players: [user],
       pendingRequestIds: [],
       isPrivate,
       status: 'scheduled',
@@ -68,7 +77,7 @@ export default function CreateGame() {
     };
 
     // Optimistic UI
-    setGames([optimisticGame, ...games]);
+    setGames([optimisticGame, ...prevGames]);
 
     try {
       const saved = await createGame({
@@ -84,16 +93,25 @@ export default function CreateGame() {
         pendingRequestIds: optimisticGame.pendingRequestIds,
         isPrivate: optimisticGame.isPrivate,
         location: optimisticGame.location,
+        status: optimisticGame.status,
+        checkedInIds: optimisticGame.checkedInIds,
+        runsStarted: optimisticGame.runsStarted,
       });
 
       // Replace optimistic item
-      setGames([saved, ...games.filter(g => g.id !== optimisticGame.id)]);
+      setGames([saved, ...prevGames.filter((g) => g.id !== optimisticGame.id)]);
       toast.success('Game created successfully!');
       navigate(`/game/${saved.id}`);
-    } catch (err) {
+    } catch (err: any) {
       // Rollback optimistic item
-      setGames(games);
-      const message = err instanceof Error ? err.message : 'Failed to create game.';
+      setGames(prevGames);
+
+      const message =
+        err?.message ||
+        err?.error_description ||
+        err?.details ||
+        'Failed to create game.';
+
       toast.error(message);
     }
   };
@@ -102,10 +120,7 @@ export default function CreateGame() {
     <div className="min-h-screen bg-background pb-24 safe-top">
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/50">
         <div className="flex items-center gap-3 px-4 py-3">
-          <button
-            onClick={() => navigate(-1)}
-            className="p-2 rounded-xl bg-secondary/60"
-          >
+          <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-secondary/60">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <h1 className="text-xl font-bold">Host a Game</h1>
@@ -187,24 +202,21 @@ export default function CreateGame() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {[30, 60, 90, 120, 180].map(d => (
-                  <SelectItem key={d} value={String(d)}>{d} minutes</SelectItem>
+                {[30, 60, 90, 120, 180].map((d) => (
+                  <SelectItem key={d} value={String(d)}>
+                    {d} minutes
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
+
           <div>
             <label className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
               <Users className="w-4 h-4" />
               Max Players
             </label>
-            <NumberStepper
-              value={maxPlayers}
-              onChange={setMaxPlayers}
-              min={2}
-              max={30}
-              step={1}
-            />
+            <NumberStepper value={maxPlayers} onChange={setMaxPlayers} min={2} max={30} step={1} />
           </div>
         </section>
 
@@ -218,8 +230,10 @@ export default function CreateGame() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {SKILL_LEVELS.map(level => (
-                <SelectItem key={level.id} value={level.id}>{level.name}</SelectItem>
+              {SKILL_LEVELS.map((level) => (
+                <SelectItem key={level.id} value={level.id}>
+                  {level.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -235,12 +249,13 @@ export default function CreateGame() {
         </section>
 
         {/* Privacy Toggle */}
-        <section className="glass-card p-4 flex items-center justify-between animate-fade-in" style={{ animationDelay: '350ms' }}>
+        <section
+          className="glass-card p-4 flex items-center justify-between animate-fade-in"
+          style={{ animationDelay: '350ms' }}
+        >
           <div>
             <h3 className="font-semibold text-foreground">Private Game</h3>
-            <p className="text-sm text-muted-foreground">
-              Players must request to join
-            </p>
+            <p className="text-sm text-muted-foreground">Players must request to join</p>
           </div>
           <Switch checked={isPrivate} onCheckedChange={setIsPrivate} />
         </section>
