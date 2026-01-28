@@ -34,7 +34,9 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
   const [isSearching, setIsSearching] = useState(false);
   const [predictions, setPredictions] = useState<google.maps.places.AutocompletePrediction[]>([]);
   const [open, setOpen] = useState(false);
+
   const serviceHostRef = useRef<HTMLDivElement | null>(null);
+  const placesServiceRef = useRef<google.maps.places.PlacesService | null>(null);
 
   // If the key is missing, gracefully fall back to manual entry.
   if (!hasGoogleMapsKey) {
@@ -61,15 +63,24 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
     return new google.maps.places.AutocompleteService();
   }, [isLoaded]);
 
-  const placesService = useMemo(() => {
-    if (!isLoaded) return null;
-    const host = serviceHostRef.current;
-    if (!host) return null;
-    return new google.maps.places.PlacesService(host);
+  // IMPORTANT: Initialize PlacesService after the hidden div ref exists.
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (!placesServiceRef.current && serviceHostRef.current) {
+      placesServiceRef.current = new google.maps.places.PlacesService(serviceHostRef.current);
+    }
   }, [isLoaded]);
+
+  // Keep the input text synced with the selected location when the dropdown is not open.
+  useEffect(() => {
+    if (!open) {
+      setSearchQuery(value.areaName || '');
+    }
+  }, [value.areaName, open]);
 
   useEffect(() => {
     if (!isLoaded || !autocomplete) return;
+
     const q = searchQuery.trim();
     if (!q) {
       setPredictions([]);
@@ -77,44 +88,47 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
     }
 
     const t = window.setTimeout(() => {
-      autocomplete.getPlacePredictions(
-        { input: q },
-        (res) => {
-          setPredictions(res ?? []);
-        }
-      );
+      autocomplete.getPlacePredictions({ input: q }, (res) => {
+        setPredictions(res ?? []);
+      });
     }, 200);
 
     return () => window.clearTimeout(t);
   }, [searchQuery, isLoaded, autocomplete]);
 
-  const handleMapClick = useCallback(async (e: google.maps.MapMouseEvent) => {
-    if (!e.latLng) return;
-    
-    const lat = e.latLng.lat();
-    const lng = e.latLng.lng();
-    
-    // Reverse geocode to get address
-    const geocoder = new google.maps.Geocoder();
-    try {
-      const result = await geocoder.geocode({ location: { lat, lng } });
-      const address = result.results[0]?.formatted_address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-      onChange({
-        latitude: lat,
-        longitude: lng,
-        areaName: address,
-      });
-    } catch {
-      onChange({
-        latitude: lat,
-        longitude: lng,
-        areaName: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
-      });
-    }
-  }, [onChange]);
+  const handleMapClick = useCallback(
+    async (e: google.maps.MapMouseEvent) => {
+      if (!e.latLng) return;
+
+      const lat = e.latLng.lat();
+      const lng = e.latLng.lng();
+
+      const geocoder = new google.maps.Geocoder();
+      try {
+        const result = await geocoder.geocode({ location: { lat, lng } });
+        const address =
+          result.results[0]?.formatted_address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+
+        onChange({
+          latitude: lat,
+          longitude: lng,
+          areaName: address,
+        });
+        setOpen(false);
+      } catch {
+        onChange({
+          latitude: lat,
+          longitude: lng,
+          areaName: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+        });
+        setOpen(false);
+      }
+    },
+    [onChange]
+  );
 
   const handleSearch = useCallback(async () => {
-    // Fallback manual search (geocode) if user hits Enter without selecting an autocomplete option.
+    // Manual search (geocode) if user hits Enter without selecting an autocomplete option.
     if (!searchQuery.trim() || !isLoaded) return;
 
     setIsSearching(true);
@@ -133,6 +147,7 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
         setPredictions([]);
       }
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error('Geocoding error:', error);
     } finally {
       setIsSearching(false);
@@ -141,7 +156,10 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
 
   const selectPrediction = useCallback(
     (p: google.maps.places.AutocompletePrediction) => {
+      const placesService = placesServiceRef.current;
+
       if (!placesService) {
+        // Should be rare now, but keep a safe fallback.
         setSearchQuery(p.description);
         setOpen(false);
         return;
@@ -155,25 +173,30 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
         },
         (details, status) => {
           setIsSearching(false);
-          if (status !== google.maps.places.PlacesServiceStatus.OK || !details?.geometry?.location) {
+          if (
+            status !== google.maps.places.PlacesServiceStatus.OK ||
+            !details?.geometry?.location
+          ) {
             setSearchQuery(p.description);
             return;
           }
 
           const loc = details.geometry.location;
           const label = details.formatted_address || details.name || p.description;
+
           onChange({
             latitude: loc.lat(),
             longitude: loc.lng(),
             areaName: label,
           });
+
           setSearchQuery(label);
           setOpen(false);
           setPredictions([]);
         }
       );
     },
-    [placesService, onChange]
+    [onChange]
   );
 
   if (loadError) {
@@ -220,7 +243,11 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
           disabled={isSearching}
           className="shrink-0"
         >
-          {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+          {isSearching ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Search className="h-4 w-4" />
+          )}
         </Button>
       </div>
 
