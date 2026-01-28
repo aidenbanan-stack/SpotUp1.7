@@ -12,7 +12,7 @@ export default function GameDetail() {
   const navigate = useNavigate();
   const { games, setGames, user } = useApp();
 
-  const game = games.find(g => g.id === id);
+  const game = games.find((g) => g.id === id);
 
   if (!game) {
     return (
@@ -42,7 +42,7 @@ export default function GameDetail() {
 
     try {
       const updated = await joinGame(game.id, user.id, game.isPrivate);
-      setGames(games.map(g => (g.id === game.id ? { ...g, ...updated } : g)));
+      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
       toast.success(game.isPrivate ? 'Join request sent! Waiting for host approval.' : 'You have joined the game!');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to join game.';
@@ -56,7 +56,7 @@ export default function GameDetail() {
 
     try {
       const updated = await leaveGame(game.id, user.id);
-      setGames(games.map(g => (g.id === game.id ? { ...g, ...updated } : g)));
+      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
       toast.success('You have left the game.');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to leave game.';
@@ -75,7 +75,7 @@ export default function GameDetail() {
     }
     try {
       const updated = await setGameStatus(game.id, 'live');
-      setGames(games.map(g => (g.id === game.id ? { ...g, ...updated } : g)));
+      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
       toast.success('Game is live.');
       navigate(`/game/${game.id}/live`);
     } catch (err) {
@@ -98,21 +98,15 @@ export default function GameDetail() {
   };
 
   return (
-    <div className="min-h-screen bg-background pb-24 safe-top">
+    <div className="min-h-screen bg-background pb-40 safe-top">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/50">
         <div className="flex items-center justify-between px-4 py-3">
-          <button
-            onClick={() => navigate(-1)}
-            className="p-2 rounded-xl bg-secondary/60"
-          >
+          <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-secondary/60">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <h1 className="text-lg font-bold">Game Details</h1>
-          <button
-            onClick={handleShare}
-            className="p-2 rounded-xl bg-secondary/60"
-          >
+          <button onClick={handleShare} className="p-2 rounded-xl bg-secondary/60">
             <Share2 className="w-5 h-5" />
           </button>
         </div>
@@ -135,7 +129,15 @@ export default function GameDetail() {
               </div>
               <h1 className="text-2xl font-bold text-foreground">{game.title}</h1>
               <div className="mt-2 inline-flex items-center gap-2 text-xs font-medium">
-                <span className={`px-2 py-1 rounded-full border border-border/50 ${isFinished ? 'bg-muted text-muted-foreground' : isLive ? 'bg-emerald-500/10 text-emerald-600' : 'bg-blue-500/10 text-blue-600'}`}>
+                <span
+                  className={`px-2 py-1 rounded-full border border-border/50 ${
+                    isFinished
+                      ? 'bg-muted text-muted-foreground'
+                      : isLive
+                      ? 'bg-emerald-500/10 text-emerald-600'
+                      : 'bg-blue-500/10 text-blue-600'
+                  }`}
+                >
                   {isFinished ? 'Finished' : isLive ? 'Live' : 'Scheduled'}
                 </span>
               </div>
@@ -145,7 +147,10 @@ export default function GameDetail() {
 
         {/* Host Info */}
         {game.host && (
-          <section className="glass-card p-4 flex items-center gap-4 animate-fade-in" style={{ animationDelay: '50ms' }}>
+          <section
+            className="glass-card p-4 flex items-center gap-4 animate-fade-in"
+            style={{ animationDelay: '50ms' }}
+          >
             <img
               src={game.host.profilePhotoUrl}
               alt={game.host.username}
@@ -177,14 +182,18 @@ export default function GameDetail() {
               <Clock className="w-4 h-4 text-primary" />
               <span className="text-xs">Time</span>
             </div>
-            <p className="font-semibold">{format(game.dateTime, 'h:mm a')} · {game.duration}min</p>
+            <p className="font-semibold">
+              {format(game.dateTime, 'h:mm a')} · {game.duration}min
+            </p>
           </div>
           <div className="glass-card p-4">
             <div className="flex items-center gap-2 text-muted-foreground mb-1">
               <Users className="w-4 h-4 text-primary" />
               <span className="text-xs">Players</span>
             </div>
-            <p className="font-semibold">{game.playerIds.length} / {game.maxPlayers}</p>
+            <p className="font-semibold">
+              {game.playerIds.length} / {game.maxPlayers}
+            </p>
           </div>
           <div className="glass-card p-4">
             <div className="flex items-center gap-2 text-muted-foreground mb-1">
@@ -224,19 +233,25 @@ export default function GameDetail() {
           <h3 className="text-sm font-semibold text-muted-foreground mb-3">
             PLAYERS ({game.playerIds.length}/{game.maxPlayers})
           </h3>
-          <div className="flex flex-wrap gap-3">
-            {game.players?.map(player => (
+
+          {/* Make this grid so it never overflows weirdly */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {game.players?.map((player) => (
               <div key={player.id} className="flex items-center gap-2 glass-card p-2 pr-4">
                 <img
                   src={player.profilePhotoUrl}
                   alt={player.username}
                   className="w-8 h-8 rounded-full object-cover"
                 />
-                <span className="text-sm font-medium">{player.username}</span>
+                <span className="text-sm font-medium truncate">{player.username}</span>
               </div>
             ))}
-            {Array.from({ length: game.maxPlayers - game.playerIds.length }).map((_, i) => (
-              <div key={`empty-${i}`} className="flex items-center gap-2 glass-card p-2 pr-4 opacity-50">
+
+            {Array.from({ length: Math.max(0, game.maxPlayers - game.playerIds.length) }).map((_, i) => (
+              <div
+                key={`empty-${i}`}
+                className="flex items-center gap-2 glass-card p-2 pr-4 opacity-50"
+              >
                 <div className="w-8 h-8 rounded-full bg-muted" />
                 <span className="text-sm text-muted-foreground">Open spot</span>
               </div>
@@ -245,34 +260,38 @@ export default function GameDetail() {
         </section>
       </main>
 
-      {/* Action Button */}
-      <div className="fixed bottom-20 left-0 right-0 px-4 safe-bottom z-40">
-        {isHost ? (
-          <div className="flex gap-3">
-            <Button variant="outline" className="flex-1" onClick={() => navigate(`/game/${id}/edit`)}>
-              Edit Game
-            </Button>
-            <Button variant="destructive" className="flex-1">
-              Cancel Game
-            </Button>
+      {/* Action Bar */}
+      <div className="fixed left-0 right-0 bottom-16 sm:bottom-6 z-50 px-4 safe-bottom">
+        <div className="mx-auto max-w-3xl">
+          <div className="bg-background/70 backdrop-blur-xl border border-border/50 rounded-2xl p-3 shadow-lg">
+            {isHost ? (
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1" onClick={() => navigate(`/game/${id}/edit`)}>
+                  Edit Game
+                </Button>
+                <Button variant="destructive" className="flex-1">
+                  Cancel Game
+                </Button>
+              </div>
+            ) : isJoined ? (
+              <Button variant="outline" className="w-full" onClick={handleLeave}>
+                Leave Game
+              </Button>
+            ) : isPending ? (
+              <Button variant="glass" className="w-full" disabled>
+                Request Pending...
+              </Button>
+            ) : isFull ? (
+              <Button variant="glass" className="w-full" disabled>
+                Game is Full
+              </Button>
+            ) : (
+              <Button variant="hero" size="xl" className="w-full" onClick={handleJoin}>
+                {game.isPrivate ? 'Request to Join' : 'Join Game'}
+              </Button>
+            )}
           </div>
-        ) : isJoined ? (
-          <Button variant="outline" className="w-full" onClick={handleLeave}>
-            Leave Game
-          </Button>
-        ) : isPending ? (
-          <Button variant="glass" className="w-full" disabled>
-            Request Pending...
-          </Button>
-        ) : isFull ? (
-          <Button variant="glass" className="w-full" disabled>
-            Game is Full
-          </Button>
-        ) : (
-          <Button variant="hero" size="xl" className="w-full" onClick={handleJoin}>
-            {game.isPrivate ? 'Request to Join' : 'Join Game'}
-          </Button>
-        )}
+        </div>
       </div>
     </div>
   );
