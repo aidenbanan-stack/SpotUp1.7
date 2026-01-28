@@ -36,9 +36,8 @@ export default function CreateGame() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Profile must be loaded to create a game correctly.
     if (!user) {
-      toast.error('Your profile is still loading. Try again in a moment.');
+      toast.error('Profile still loading. Try again in a moment.');
       return;
     }
 
@@ -76,7 +75,6 @@ export default function CreateGame() {
       createdAt: new Date(),
     };
 
-    // Optimistic UI
     setGames([optimisticGame, ...prevGames]);
 
     try {
@@ -98,18 +96,21 @@ export default function CreateGame() {
         runsStarted: optimisticGame.runsStarted,
       });
 
-      // Replace optimistic item
       setGames([saved, ...prevGames.filter((g) => g.id !== optimisticGame.id)]);
       toast.success('Game created successfully!');
       navigate(`/game/${saved.id}`);
     } catch (err: any) {
-      // Rollback optimistic item
       setGames(prevGames);
+
+      // This is the important part: see the real error
+      // eslint-disable-next-line no-console
+      console.error('[createGame] failed:', err);
 
       const message =
         err?.message ||
         err?.error_description ||
         err?.details ||
+        err?.hint ||
         'Failed to create game.';
 
       toast.error(message);
@@ -128,7 +129,6 @@ export default function CreateGame() {
       </header>
 
       <form onSubmit={handleSubmit} className="px-4 py-6 space-y-6">
-        {/* Sport Selection */}
         <section className="animate-fade-in">
           <label className="text-sm font-semibold text-muted-foreground mb-3 block">
             SELECT SPORT *
@@ -136,7 +136,6 @@ export default function CreateGame() {
           <SportGrid selected={sport} onChange={setSport} single />
         </section>
 
-        {/* Game Details */}
         <section className="space-y-4 animate-fade-in" style={{ animationDelay: '100ms' }}>
           <div>
             <label className="text-sm font-medium text-muted-foreground mb-2 block">
@@ -163,7 +162,6 @@ export default function CreateGame() {
           </div>
         </section>
 
-        {/* Date & Time */}
         <section className="grid grid-cols-2 gap-4 animate-fade-in" style={{ animationDelay: '150ms' }}>
           <div>
             <label className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
@@ -191,7 +189,6 @@ export default function CreateGame() {
           </div>
         </section>
 
-        {/* Duration & Players */}
         <section className="space-y-4 animate-fade-in" style={{ animationDelay: '200ms' }}>
           <div>
             <label className="text-sm font-medium text-muted-foreground mb-2 block">
@@ -220,7 +217,6 @@ export default function CreateGame() {
           </div>
         </section>
 
-        {/* Skill Level */}
         <section className="animate-fade-in" style={{ animationDelay: '250ms' }}>
           <label className="text-sm font-medium text-muted-foreground mb-2 block">
             Skill Level Required
@@ -239,7 +235,6 @@ export default function CreateGame() {
           </Select>
         </section>
 
-        {/* Location */}
         <section className="animate-fade-in" style={{ animationDelay: '300ms' }}>
           <label className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
             <MapPin className="w-4 h-4" />
@@ -248,11 +243,7 @@ export default function CreateGame() {
           <LocationPicker value={location} onChange={setLocation} />
         </section>
 
-        {/* Privacy Toggle */}
-        <section
-          className="glass-card p-4 flex items-center justify-between animate-fade-in"
-          style={{ animationDelay: '350ms' }}
-        >
+        <section className="glass-card p-4 flex items-center justify-between animate-fade-in" style={{ animationDelay: '350ms' }}>
           <div>
             <h3 className="font-semibold text-foreground">Private Game</h3>
             <p className="text-sm text-muted-foreground">Players must request to join</p>
@@ -260,7 +251,6 @@ export default function CreateGame() {
           <Switch checked={isPrivate} onCheckedChange={setIsPrivate} />
         </section>
 
-        {/* Submit */}
         <Button type="submit" variant="hero" size="xl" className="w-full">
           Create Game
         </Button>
