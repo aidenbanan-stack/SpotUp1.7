@@ -1,4 +1,3 @@
-
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
@@ -6,13 +5,7 @@ import { Button } from '@/components/ui/button';
 import { SportBadge } from '@/components/SportIcon';
 import { ArrowLeft, Users, CheckCircle2, Clock, Play, Pause, Flag, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
-import { mockUsers } from '@/data/mockData';
 import { endGame, setRunsStarted, toggleCheckIn } from '@/lib/gamesApi';
-
-function resolveName(userId: string) {
-  const u = mockUsers.find(m => m.id === userId);
-  return u?.username ?? `Player ${userId}`;
-}
 
 export default function LiveGame() {
   const { id } = useParams();
@@ -28,8 +21,12 @@ export default function LiveGame() {
 
   const checkedInIds = game?.checkedInIds ?? [];
   const signedUpIds = game?.playerIds ?? [];
-  const pendingIds = game?.pendingRequestIds ?? [];
   const notCheckedInIds = signedUpIds.filter(pid => !checkedInIds.includes(pid));
+
+  const resolveName = (userId: string) => {
+    const u = game?.players?.find(p => p.id === userId);
+    return u?.username ?? 'Player';
+  };
 
   const handleCheckInToggle = async () => {
     if (!user || !game) {
@@ -106,6 +103,40 @@ export default function LiveGame() {
     );
   }
 
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-background p-6">
+        <div className="max-w-lg mx-auto space-y-4">
+          <Button variant="ghost" onClick={() => navigate(`/game/${game.id}`)} className="gap-2">
+            <ArrowLeft className="w-4 h-4" />
+            Game
+          </Button>
+          <div className="glass-card p-5">
+            <div className="font-semibold">Please sign in</div>
+            <div className="text-sm text-muted-foreground">You need an account to view the live session.</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isHost && !isJoined) {
+    return (
+      <div className="min-h-screen bg-background p-6">
+        <div className="max-w-lg mx-auto space-y-4">
+          <Button variant="ghost" onClick={() => navigate(`/game/${game.id}`)} className="gap-2">
+            <ArrowLeft className="w-4 h-4" />
+            Game
+          </Button>
+          <div className="glass-card p-5">
+            <div className="font-semibold">Not allowed</div>
+            <div className="text-sm text-muted-foreground">Only the host and joined players can view the live session.</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background pb-24 safe-top">
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/50">
@@ -137,108 +168,61 @@ export default function LiveGame() {
               {isHost ? (
                 <Button onClick={handleRunsToggle} disabled={busy} variant={game.runsStarted ? 'secondary' : 'hero'} className="gap-2">
                   {game.runsStarted ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                  {game.runsStarted ? 'Pause runs' : 'Start runs'}
+                  {game.runsStarted ? 'Pause' : 'Start'}
                 </Button>
               ) : (
-                <Button onClick={handleCheckInToggle} disabled={busy || (!isJoined && !isHost)} variant={isCheckedIn ? 'secondary' : 'hero'} className="gap-2">
-                  <CheckCircle2 className="w-4 h-4" />
-                  {isCheckedIn ? 'Checked in' : 'Check in'}
-                </Button>
-              )}
-
-              {isHost && (
-                <Button onClick={handleEndGame} disabled={busy} variant="destructive" className="gap-2">
-                  <Flag className="w-4 h-4" />
-                  End game
-                </Button>
+                <div className="text-xs text-muted-foreground">Host controls runs</div>
               )}
             </div>
           </div>
-
-          {!isHost && !isJoined && (
-            <div className="mt-4 text-sm text-muted-foreground">
-              You are not signed up for this game yet. Join from the Game page to check in.
-            </div>
-          )}
         </section>
 
-        <section className="grid grid-cols-1 gap-3">
-          <div className="rounded-2xl border border-border/50 bg-card p-5">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold text-foreground flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4" />
-                Checked in
-              </div>
-              <div className="text-sm text-muted-foreground">{checkedInIds.length}</div>
+        <section className="rounded-2xl border border-border/50 bg-card p-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-primary" />
+              <div className="font-semibold">Check-in</div>
             </div>
-
-            <div className="mt-3 space-y-2">
-              {checkedInIds.length === 0 ? (
-                <div className="text-sm text-muted-foreground">No one has checked in yet.</div>
-              ) : (
-                checkedInIds.map(pid => (
-                  <div key={pid} className="flex items-center justify-between rounded-xl border border-border/50 px-3 py-2">
-                    <div className="text-sm font-medium text-foreground">{resolveName(pid)}</div>
-                    <span className="text-xs text-muted-foreground">Arrived</span>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {isHost && (
-              <div className="mt-4">
-                <Button onClick={handleCheckInToggle} disabled={busy} variant={isCheckedIn ? 'secondary' : 'hero'} className="w-full gap-2">
-                  <CheckCircle2 className="w-4 h-4" />
-                  {isCheckedIn ? 'Remove my check-in' : 'Check in as host'}
-                </Button>
-              </div>
-            )}
+            <Button onClick={handleCheckInToggle} disabled={busy} variant={isCheckedIn ? 'secondary' : 'hero'} className="gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              {isCheckedIn ? 'Checked in' : 'Check in'}
+            </Button>
           </div>
 
-          <div className="rounded-2xl border border-border/50 bg-card p-5">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold text-foreground flex items-center gap-2">
-                <Users className="w-4 h-4" />
-                Signed up, not joined yet
-              </div>
-              <div className="text-sm text-muted-foreground">{notCheckedInIds.length}</div>
-            </div>
-
-            <div className="mt-3 space-y-2">
-              {notCheckedInIds.length === 0 ? (
-                <div className="text-sm text-muted-foreground">Everyone signed up has checked in.</div>
-              ) : (
-                notCheckedInIds.map(pid => (
-                  <div key={pid} className="flex items-center justify-between rounded-xl border border-border/50 px-3 py-2">
-                    <div className="text-sm font-medium text-foreground">{resolveName(pid)}</div>
-                    <span className="text-xs text-muted-foreground">Not here</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {game.isPrivate && pendingIds.length > 0 && (
-            <div className="rounded-2xl border border-border/50 bg-card p-5">
-              <div className="flex items-center justify-between">
-                <div className="font-semibold text-foreground flex items-center gap-2">
-                  <Clock className="w-4 h-4" />
-                  Pending requests
+          <div className="mt-4 grid grid-cols-1 gap-2">
+            {checkedInIds.map((pid) => (
+              <div key={pid} className="flex items-center justify-between rounded-xl border border-border/50 p-3">
+                <div className="font-medium">{resolveName(pid)}</div>
+                <div className="text-xs text-emerald-600 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  Here
                 </div>
-                <div className="text-sm text-muted-foreground">{pendingIds.length}</div>
               </div>
+            ))}
 
-              <div className="mt-3 space-y-2">
-                {pendingIds.map(pid => (
-                  <div key={pid} className="flex items-center justify-between rounded-xl border border-border/50 px-3 py-2">
-                    <div className="text-sm font-medium text-foreground">{resolveName(pid)}</div>
-                    <span className="text-xs text-muted-foreground">Awaiting approval</span>
-                  </div>
-                ))}
+            {notCheckedInIds.map((pid) => (
+              <div key={pid} className="flex items-center justify-between rounded-xl border border-border/50 p-3 opacity-70">
+                <div className="font-medium">{resolveName(pid)}</div>
+                <div className="text-xs text-muted-foreground">Not checked in</div>
               </div>
-            </div>
-          )}
+            ))}
+          </div>
         </section>
+
+        {isHost && (
+          <section className="rounded-2xl border border-border/50 bg-card p-5">
+            <div className="flex items-center justify-between">
+              <div className="font-semibold">End game</div>
+              <Button onClick={handleEndGame} disabled={busy} variant="destructive" className="gap-2">
+                <Flag className="w-4 h-4" />
+                End
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground mt-2">
+              This will end the live session and open postgame voting.
+            </div>
+          </section>
+        )}
       </main>
     </div>
   );
