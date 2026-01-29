@@ -6,7 +6,7 @@ import { SportIcon, SportBadge } from '@/components/SportIcon';
 import { ArrowLeft, Calendar, Clock, Lock, MapPin, Share2, Users } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { joinGame, leaveGame, setGameStatus } from '@/lib/gamesApi';
+import { deleteGame, joinGame, leaveGame, setGameStatus } from '@/lib/gamesApi';
 import PlayerProfileDialog from '@/components/PlayerProfileDialog';
 
 export default function GameDetail() {
@@ -37,6 +37,8 @@ export default function GameDetail() {
 
   const isLive = game.status === 'live';
   const isFinished = game.status === 'finished';
+
+  const canViewLive = (isHost || isJoined) && isLive;
 
   const openProfile = (userId: string) => {
     setSelectedUserId(userId);
@@ -94,6 +96,20 @@ export default function GameDetail() {
     }
   };
 
+  const handleCancel = async () => {
+    if (!isHost) return;
+
+    try {
+      await deleteGame(game.id);
+      setGames(games.filter((g) => g.id !== game.id));
+      toast.success('Game cancelled.');
+      navigate('/');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to cancel game.';
+      toast.error(message);
+    }
+  };
+
   const handleShare = () => {
     navigator.clipboard.writeText(window.location.href);
     toast.success('Link copied to clipboard!');
@@ -101,7 +117,6 @@ export default function GameDetail() {
 
   return (
     <div className="min-h-screen bg-background pb-[220px] md:pb-[260px] safe-top">
-      {/* Header */}
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/50">
         <div className="flex items-center justify-between px-4 py-3">
           <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-secondary/60">
@@ -115,7 +130,6 @@ export default function GameDetail() {
       </header>
 
       <main className="px-4 py-6 space-y-6">
-        {/* Sport & Title */}
         <section className="animate-fade-in">
           <div className="flex items-start gap-4 mb-4">
             <SportIcon sport={game.sport} size="xl" />
@@ -147,17 +161,9 @@ export default function GameDetail() {
           </div>
         </section>
 
-        {/* Host Info */}
         {game.host && (
-          <section
-            className="glass-card p-4 flex items-center gap-4 animate-fade-in"
-            style={{ animationDelay: '50ms' }}
-          >
-            <img
-              src={game.host.profilePhotoUrl}
-              alt={game.host.username}
-              className="w-12 h-12 rounded-full object-cover"
-            />
+          <section className="glass-card p-4 flex items-center gap-4 animate-fade-in" style={{ animationDelay: '50ms' }}>
+            <img src={game.host.profilePhotoUrl} alt={game.host.username} className="w-12 h-12 rounded-full object-cover" />
             <div className="flex-1">
               <span className="text-xs text-muted-foreground">Hosted by</span>
               <p className="font-semibold text-foreground">{game.host.username}</p>
@@ -170,7 +176,6 @@ export default function GameDetail() {
           </section>
         )}
 
-        {/* Details Grid */}
         <section className="grid grid-cols-2 gap-3 animate-fade-in" style={{ animationDelay: '100ms' }}>
           <div className="glass-card p-4">
             <div className="flex items-center gap-2 text-muted-foreground mb-1">
@@ -206,7 +211,6 @@ export default function GameDetail() {
           </div>
         </section>
 
-        {/* Location */}
         <section className="glass-card p-4 animate-fade-in" style={{ animationDelay: '150ms' }}>
           <div className="flex items-center gap-2 text-muted-foreground mb-2">
             <MapPin className="w-4 h-4 text-primary" />
@@ -222,7 +226,6 @@ export default function GameDetail() {
           )}
         </section>
 
-        {/* Description */}
         {game.description && (
           <section className="animate-fade-in" style={{ animationDelay: '200ms' }}>
             <h3 className="text-sm font-semibold text-muted-foreground mb-2">ABOUT THIS GAME</h3>
@@ -230,9 +233,8 @@ export default function GameDetail() {
           </section>
         )}
 
-        {/* Players */}
         <section className="animate-fade-in" style={{ animationDelay: '250ms' }}>
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3">
+          <h3 className="text-sm font-semibold text-muted-foreground mb-3}>
             PLAYERS ({game.playerIds.length}/{game.maxPlayers})
           </h3>
 
@@ -265,16 +267,21 @@ export default function GameDetail() {
         <PlayerProfileDialog open={profileOpen} onOpenChange={setProfileOpen} userId={selectedUserId} />
       </main>
 
-      {/* Action Bar */}
       <div className="fixed left-0 right-0 bottom-24 md:bottom-28 z-50 px-4 safe-bottom">
         <div className="mx-auto max-w-3xl">
-          <div className="bg-background/70 backdrop-blur-xl border border-border/50 rounded-2xl p-3 shadow-lg">
+          <div className="bg-background/70 backdrop-blur-xl border border-border/50 rounded-2xl p-3 shadow-lg space-y-3">
+            {canViewLive && (
+              <Button variant="hero" size="xl" className="w-full" onClick={() => navigate(`/game/${game.id}/live`)}>
+                View Live Game
+              </Button>
+            )}
+
             {isHost ? (
               <div className="flex gap-3">
                 <Button variant="outline" className="flex-1" onClick={() => navigate(`/game/${id}/edit`)}>
                   Edit Game
                 </Button>
-                <Button variant="destructive" className="flex-1">
+                <Button variant="destructive" className="flex-1" onClick={handleCancel}>
                   Cancel Game
                 </Button>
               </div>
@@ -297,11 +304,9 @@ export default function GameDetail() {
             )}
 
             {isHost && !isFinished && !isLive && (
-              <div className="mt-3">
-                <Button variant="hero" size="xl" className="w-full" onClick={handleGoLive}>
-                  Go Live
-                </Button>
-              </div>
+              <Button variant="hero" size="xl" className="w-full" onClick={handleGoLive}>
+                Go Live
+              </Button>
             )}
           </div>
         </div>
