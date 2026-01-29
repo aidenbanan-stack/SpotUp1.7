@@ -9,11 +9,11 @@ import { mockUsers } from '@/data/mockData';
 import { PostGameVoting } from '@/components/PostGameVoting';
 import { submitPostGameVotes } from '@/lib/gamesApi';
 
-function resolveUser(userId: string) {
-  return mockUsers.find(m => m.id === userId);
+function resolveUser(userId: any) {
+  return mockUsers.find((m) => m.id === userId);
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
+const CATEGORY_LABELS = {
   best_shooter: 'Best Shooter',
   best_passer: 'Best Passer',
   best_all_around: 'Best All-Around',
