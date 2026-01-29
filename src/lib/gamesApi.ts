@@ -1,5 +1,6 @@
 import type { Game, SkillLevel, Sport } from '@/types';
 import { supabase } from '@/lib/supabaseClient';
+import { fetchProfileById, fetchProfilesByIds } from '@/lib/profileApi';
 
 // DB shape (public.games)
 export type GameRow = {
@@ -28,6 +29,10 @@ export type GameRow = {
 };
 
 function rowToGame(row: GameRow): Game {
+  // IMPORTANT: Always include host in playerIds for UI correctness,
+  // even if older rows forgot to store host_id in player_ids.
+  const playerIds = Array.from(new Set([row.host_id, ...((row.player_ids ?? []) as string[])]));
+
   return {
     id: row.id,
     hostId: row.host_id,
@@ -38,7 +43,7 @@ function rowToGame(row: GameRow): Game {
     duration: row.duration,
     skillRequirement: row.skill_requirement,
     maxPlayers: row.max_players,
-    playerIds: row.player_ids ?? [],
+    playerIds,
     pendingRequestIds: row.pending_request_ids ?? [],
     isPrivate: row.is_private,
     status: row.status ?? 'scheduled',
@@ -56,6 +61,25 @@ function rowToGame(row: GameRow): Game {
   };
 }
 
+async function hydrateGame(game: Game): Promise<Game> {
+  // Hydrate the full user objects that the UI renders.
+  // If these fetches fail (missing table, RLS misconfigured, etc), we still return the base game.
+  try {
+    const [players, host] = await Promise.all([
+      fetchProfilesByIds(game.playerIds ?? []),
+      fetchProfileById(game.hostId),
+    ]);
+
+    return {
+      ...game,
+      players,
+      host: host ?? undefined,
+    };
+  } catch {
+    return game;
+  }
+}
+
 export async function fetchGames(): Promise<Game[]> {
   const { data, error } = await supabase
     .from('games')
@@ -63,7 +87,8 @@ export async function fetchGames(): Promise<Game[]> {
     .order('created_at', { ascending: false });
 
   if (error) throw error;
-  return (data as GameRow[]).map(rowToGame);
+  const base = (data as GameRow[]).map(rowToGame);
+  return await Promise.all(base.map(hydrateGame));
 }
 
 export type CreateGameInput = Omit<
@@ -72,6 +97,9 @@ export type CreateGameInput = Omit<
 >;
 
 export async function createGame(input: CreateGameInput): Promise<Game> {
+  // Safety: make sure the host is always included in player_ids.
+  const playerIds = Array.from(new Set([input.hostId, ...(input.playerIds ?? [])]));
+
   const insertRow = {
     host_id: input.hostId,
     sport: input.sport,
@@ -81,7 +109,7 @@ export async function createGame(input: CreateGameInput): Promise<Game> {
     duration: input.duration,
     skill_requirement: input.skillRequirement,
     max_players: input.maxPlayers,
-    player_ids: input.playerIds,
+    player_ids: playerIds,
     pending_request_ids: input.pendingRequestIds,
     is_private: input.isPrivate,
     status: input.status ?? 'scheduled',
@@ -102,7 +130,7 @@ export async function createGame(input: CreateGameInput): Promise<Game> {
     .single();
 
   if (error) throw error;
-  return rowToGame(data as GameRow);
+  return await hydrateGame(rowToGame(data as GameRow));
 }
 
 /**
@@ -121,7 +149,7 @@ export async function joinGame(
     .single();
 
   if (error) throw error;
-  return rowToGame(data as GameRow);
+  return await hydrateGame(rowToGame(data as GameRow));
 }
 
 export async function leaveGame(gameId: string, _userId: string): Promise<Game> {
@@ -130,7 +158,7 @@ export async function leaveGame(gameId: string, _userId: string): Promise<Game> 
     .single();
 
   if (error) throw error;
-  return rowToGame(data as GameRow);
+  return await hydrateGame(rowToGame(data as GameRow));
 }
 
 export async function setGameStatus(
@@ -145,7 +173,7 @@ export async function setGameStatus(
     .single();
 
   if (error) throw error;
-  return rowToGame(data as GameRow);
+  return await hydrateGame(rowToGame(data as GameRow));
 }
 
 export async function toggleCheckIn(
@@ -158,7 +186,7 @@ export async function toggleCheckIn(
     .single();
 
   if (error) throw error;
-  return rowToGame(data as GameRow);
+  return await hydrateGame(rowToGame(data as GameRow));
 }
 
 export async function setRunsStarted(gameId: string, runsStarted: boolean): Promise<Game> {
@@ -170,7 +198,7 @@ export async function setRunsStarted(gameId: string, runsStarted: boolean): Prom
     .single();
 
   if (error) throw error;
-  return rowToGame(data as GameRow);
+  return await hydrateGame(rowToGame(data as GameRow));
 }
 
 export async function endGame(gameId: string): Promise<Game> {
@@ -182,7 +210,7 @@ export async function endGame(gameId: string): Promise<Game> {
     .single();
 
   if (error) throw error;
-  return rowToGame(data as GameRow);
+  return await hydrateGame(rowToGame(data as GameRow));
 }
 
 type PostGameVoteCategory =
@@ -227,7 +255,7 @@ export async function submitPostGameVotes(
     // No-op, but return latest game row
     const { data, error } = await supabase.from('games').select('*').eq('id', gameId).single();
     if (error) throw error;
-    return rowToGame(data as GameRow);
+    return await hydrateGame(rowToGame(data as GameRow));
   }
 
   const nextVotes: PostGameVotes = { ...currentVotes } as any;
@@ -250,5 +278,5 @@ export async function submitPostGameVotes(
     .single();
 
   if (error) throw error;
-  return rowToGame(data as GameRow);
+  return await hydrateGame(rowToGame(data as GameRow));
 }
