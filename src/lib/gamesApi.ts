@@ -9,7 +9,7 @@ export type GameRow = {
   sport: Sport;
   title: string;
   description: string | null;
-  date_time: string; // timestamptz
+  date_time: string;
   duration: number;
   skill_requirement: SkillLevel;
   max_players: number;
@@ -25,12 +25,10 @@ export type GameRow = {
   location_latitude: number;
   location_longitude: number;
   location_area_name: string;
-  created_at: string; // timestamptz
+  created_at: string;
 };
 
 function rowToGame(row: GameRow): Game {
-  // IMPORTANT: Always include host in playerIds for UI correctness,
-  // even if older rows forgot to store host_id in player_ids.
   const playerIds = Array.from(new Set([row.host_id, ...((row.player_ids ?? []) as string[])]));
 
   return {
@@ -62,8 +60,6 @@ function rowToGame(row: GameRow): Game {
 }
 
 async function hydrateGame(game: Game): Promise<Game> {
-  // Hydrate the full user objects that the UI renders.
-  // If these fetches fail (missing table, RLS misconfigured, etc), we still return the base game.
   try {
     const [players, host] = await Promise.all([
       fetchProfilesByIds(game.playerIds ?? []),
@@ -87,6 +83,7 @@ export async function fetchGames(): Promise<Game[]> {
     .order('created_at', { ascending: false });
 
   if (error) throw error;
+
   const base = (data as GameRow[]).map(rowToGame);
   return await Promise.all(base.map(hydrateGame));
 }
@@ -97,7 +94,6 @@ export type CreateGameInput = Omit<
 >;
 
 export async function createGame(input: CreateGameInput): Promise<Game> {
-  // Safety: make sure the host is always included in player_ids.
   const playerIds = Array.from(new Set([input.hostId, ...(input.playerIds ?? [])]));
 
   const insertRow = {
@@ -123,9 +119,37 @@ export async function createGame(input: CreateGameInput): Promise<Game> {
     location_area_name: input.location.areaName,
   };
 
+  const { data, error } = await supabase.from('games').insert(insertRow).select('*').single();
+  if (error) throw error;
+
+  return await hydrateGame(rowToGame(data as GameRow));
+}
+
+export async function updateGame(
+  gameId: string,
+  patch: Partial<Pick<Game, 'sport' | 'title' | 'description' | 'dateTime' | 'duration' | 'skillRequirement' | 'maxPlayers' | 'isPrivate' | 'location'>>
+): Promise<Game> {
+  const updateRow: any = {};
+
+  if (patch.sport) updateRow.sport = patch.sport;
+  if (patch.title !== undefined) updateRow.title = patch.title;
+  if (patch.description !== undefined) updateRow.description = patch.description || null;
+  if (patch.dateTime) updateRow.date_time = patch.dateTime.toISOString();
+  if (patch.duration !== undefined) updateRow.duration = patch.duration;
+  if (patch.skillRequirement) updateRow.skill_requirement = patch.skillRequirement;
+  if (patch.maxPlayers !== undefined) updateRow.max_players = patch.maxPlayers;
+  if (patch.isPrivate !== undefined) updateRow.is_private = patch.isPrivate;
+
+  if (patch.location) {
+    updateRow.location_latitude = patch.location.latitude;
+    updateRow.location_longitude = patch.location.longitude;
+    updateRow.location_area_name = patch.location.areaName;
+  }
+
   const { data, error } = await supabase
     .from('games')
-    .insert(insertRow)
+    .update(updateRow)
+    .eq('id', gameId)
     .select('*')
     .single();
 
@@ -133,30 +157,23 @@ export async function createGame(input: CreateGameInput): Promise<Game> {
   return await hydrateGame(rowToGame(data as GameRow));
 }
 
+export async function deleteGame(gameId: string): Promise<void> {
+  const { error } = await supabase.from('games').delete().eq('id', gameId);
+  if (error) throw error;
+}
+
 /**
- * SECURE JOIN / LEAVE / CHECK-IN
- * These call Postgres RPC functions that enforce permissions via auth.uid().
- * Do not trust client-provided userId or isPrivate.
+ * Secure join/leave/check-in use RPCs that enforce auth.uid() on the server.
  */
 
-export async function joinGame(
-  gameId: string,
-  _userId: string,
-  _isPrivate: boolean
-): Promise<Game> {
-  const { data, error } = await supabase
-    .rpc('join_or_request_game', { p_game_id: gameId })
-    .single();
-
+export async function joinGame(gameId: string, _userId: string, _isPrivate: boolean): Promise<Game> {
+  const { data, error } = await supabase.rpc('join_or_request_game', { p_game_id: gameId }).single();
   if (error) throw error;
   return await hydrateGame(rowToGame(data as GameRow));
 }
 
 export async function leaveGame(gameId: string, _userId: string): Promise<Game> {
-  const { data, error } = await supabase
-    .rpc('leave_game', { p_game_id: gameId })
-    .single();
-
+  const { data, error } = await supabase.rpc('leave_game', { p_game_id: gameId }).single();
   if (error) throw error;
   return await hydrateGame(rowToGame(data as GameRow));
 }
@@ -176,11 +193,7 @@ export async function setGameStatus(
   return await hydrateGame(rowToGame(data as GameRow));
 }
 
-export async function toggleCheckIn(
-  gameId: string,
-  _userId: string,
-  checkedIn: boolean
-): Promise<Game> {
+export async function toggleCheckIn(gameId: string, _userId: string, checkedIn: boolean): Promise<Game> {
   const { data, error } = await supabase
     .rpc('toggle_check_in', { p_game_id: gameId, p_checked_in: checkedIn })
     .single();
@@ -205,74 +218,6 @@ export async function endGame(gameId: string): Promise<Game> {
   const { data, error } = await supabase
     .from('games')
     .update({ status: 'finished', ended_at: new Date().toISOString(), runs_started: false })
-    .eq('id', gameId)
-    .select('*')
-    .single();
-
-  if (error) throw error;
-  return await hydrateGame(rowToGame(data as GameRow));
-}
-
-type PostGameVoteCategory =
-  | 'best_shooter'
-  | 'best_passer'
-  | 'best_all_around'
-  | 'best_scorer'
-  | 'best_defender';
-
-type PostGameVotes = Record<PostGameVoteCategory, Record<string, number>>;
-type PostGameVoters = Record<string, Partial<Record<PostGameVoteCategory, string>>>;
-
-export async function submitPostGameVotes(
-  gameId: string,
-  voterId: string,
-  votes: { category: PostGameVoteCategory; votedUserId: string }[]
-): Promise<Game> {
-  const { data: existing, error: fetchError } = await supabase
-    .from('games')
-    .select('post_game_votes, post_game_voters')
-    .eq('id', gameId)
-    .single();
-
-  if (fetchError) throw fetchError;
-
-  const currentVotes: PostGameVotes =
-    (existing?.post_game_votes as PostGameVotes) ?? {
-      best_shooter: {},
-      best_passer: {},
-      best_all_around: {},
-      best_scorer: {},
-      best_defender: {},
-    };
-
-  const currentVoters: PostGameVoters = (existing?.post_game_voters as PostGameVoters) ?? {};
-
-  const voterRecord = currentVoters[voterId] ?? {};
-  // Prevent double-voting per category.
-  const filtered = votes.filter((v) => !voterRecord[v.category]);
-
-  if (filtered.length === 0) {
-    // No-op, but return latest game row
-    const { data, error } = await supabase.from('games').select('*').eq('id', gameId).single();
-    if (error) throw error;
-    return await hydrateGame(rowToGame(data as GameRow));
-  }
-
-  const nextVotes: PostGameVotes = { ...currentVotes } as any;
-  for (const v of filtered) {
-    const bucket = { ...(nextVotes[v.category] ?? {}) };
-    bucket[v.votedUserId] = (bucket[v.votedUserId] ?? 0) + 1;
-    nextVotes[v.category] = bucket;
-  }
-
-  const nextVoters: PostGameVoters = { ...currentVoters, [voterId]: { ...voterRecord } };
-  for (const v of filtered) {
-    nextVoters[voterId][v.category] = v.votedUserId;
-  }
-
-  const { data, error } = await supabase
-    .from('games')
-    .update({ post_game_votes: nextVotes, post_game_voters: nextVoters })
     .eq('id', gameId)
     .select('*')
     .single();
