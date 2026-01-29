@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, ReactNode } fr
 import { User, Sport, Game, Notification } from '@/types';
 import { mockGames, mockNotifications } from '@/data/mockData';
 import { fetchGames } from '@/lib/gamesApi';
+import { fetchMyNotifications } from '@/lib/notificationsApi';
 
 interface AppContextType {
   user: User | null;
@@ -16,6 +17,7 @@ interface AppContextType {
   gamesError: string | null;
   notifications: Notification[];
   setNotifications: (notifications: Notification[]) => void;
+  refreshNotifications: () => Promise<void>;
   unreadCount: number;
 }
 
@@ -30,7 +32,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [gamesError, setGamesError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>(mockNotifications);
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
   const refreshGames = async () => {
     try {
@@ -47,12 +49,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const refreshNotifications = async () => {
+    try {
+      const db = await fetchMyNotifications(50);
+      setNotifications(db);
+    } catch {
+      // Keep whatever is already in state (mock) if the table does not exist yet.
+    }
+  };
+
   useEffect(() => {
-    // Load from Supabase on startup. If env vars are missing, fetchGames will fail and
+    // Load games from Supabase on startup. If env vars are missing, fetchGames will fail and
     // the UI will fall back to mock data.
     void refreshGames();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    // When a real user is loaded, pull their notifications.
+    if (!user) return;
+    void refreshNotifications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const value = useMemo(
     () => ({
@@ -68,16 +86,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       gamesError,
       notifications,
       setNotifications,
+      refreshNotifications,
       unreadCount,
     }),
     [user, selectedSport, games, notifications, unreadCount, gamesLoading, gamesError]
   );
 
-  return (
-    <AppContext.Provider value={value}>
-      {children}
-    </AppContext.Provider>
-  );
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
 export function useApp() {
