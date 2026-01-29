@@ -82,3 +82,33 @@ export async function getOrCreateMyProfile(): Promise<User> {
   if (insErr) throw insErr;
   return profileToUser(created as ProfileRow);
 }
+
+/**
+ * Fetch a single user profile by id.
+ * Returns null if the profile does not exist.
+ */
+export async function fetchProfileById(id: string): Promise<User | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id,email,username,profile_photo_url')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data ? profileToUser(data as ProfileRow) : null;
+}
+
+/**
+ * Fetch many user profiles by their ids.
+ */
+export async function fetchProfilesByIds(ids: string[]): Promise<User[]> {
+  if (!ids.length) return [];
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id,email,username,profile_photo_url')
+    .in('id', ids);
+
+  if (error) throw error;
+  return (data ?? []).map((row) => profileToUser(row as ProfileRow));
+}
