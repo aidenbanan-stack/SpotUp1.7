@@ -225,3 +225,78 @@ export async function endGame(gameId: string): Promise<Game> {
   if (error) throw error;
   return await hydrateGame(rowToGame(data as GameRow));
 }
+
+type PostGameVoteCategory =
+  | 'best_shooter'
+  | 'best_passer'
+  | 'best_all_around'
+  | 'best_scorer'
+  | 'best_defender';
+
+type PostGameVotes = Record<PostGameVoteCategory, Record<string, number>>;
+type PostGameVoters = Record<string, Partial<Record<PostGameVoteCategory, string>>>;
+
+/**
+ * Submit postgame votes.
+ * Stores aggregated vote counts in games.post_game_votes and a "who voted for who" record in games.post_game_voters
+ * so a user cannot vote twice in the same category.
+ */
+export async function submitPostGameVotes(
+  gameId: string,
+  voterId: string,
+  votes: { category: PostGameVoteCategory; votedUserId: string }[]
+): Promise<Game> {
+  const { data: existing, error: fetchError } = await supabase
+    .from('games')
+    .select('post_game_votes, post_game_voters')
+    .eq('id', gameId)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  const currentVotes: PostGameVotes =
+    (existing?.post_game_votes as PostGameVotes) ?? {
+      best_shooter: {},
+      best_passer: {},
+      best_all_around: {},
+      best_scorer: {},
+      best_defender: {},
+    };
+
+  const currentVoters: PostGameVoters = (existing?.post_game_voters as PostGameVoters) ?? {};
+
+  const voterRecord = currentVoters[voterId] ?? {};
+  const filtered = votes.filter((v) => !voterRecord[v.category]);
+
+  if (filtered.length === 0) {
+    const { data, error } = await supabase.from('games').select('*').eq('id', gameId).single();
+    if (error) throw error;
+    // rowToGame/hydrateGame are in this file already
+    // @ts-ignore
+    return await hydrateGame(rowToGame(data as GameRow));
+  }
+
+  const nextVotes: PostGameVotes = { ...currentVotes } as any;
+  for (const v of filtered) {
+    const bucket = { ...(nextVotes[v.category] ?? {}) };
+    bucket[v.votedUserId] = (bucket[v.votedUserId] ?? 0) + 1;
+    nextVotes[v.category] = bucket;
+  }
+
+  const nextVoters: PostGameVoters = { ...currentVoters, [voterId]: { ...voterRecord } };
+  for (const v of filtered) {
+    nextVoters[voterId][v.category] = v.votedUserId;
+  }
+
+  const { data, error } = await supabase
+    .from('games')
+    .update({ post_game_votes: nextVotes, post_game_voters: nextVoters })
+    .eq('id', gameId)
+    .select('*')
+    .single();
+
+  if (error) throw error;
+
+  // @ts-ignore
+  return await hydrateGame(rowToGame(data as GameRow));
+}
