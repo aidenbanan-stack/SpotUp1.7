@@ -234,7 +234,7 @@ export default function GameDetail() {
         )}
 
         <section className="animate-fade-in" style={{ animationDelay: '250ms' }}>
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3}>
+          <h3 className="text-sm font-semibold text-muted-foreground mb-3">
             PLAYERS ({game.playerIds.length}/{game.maxPlayers})
           </h3>
 
