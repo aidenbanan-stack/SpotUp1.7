@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -6,11 +7,15 @@ import { ArrowLeft, Calendar, Clock, Lock, MapPin, Share2, Users } from 'lucide-
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { joinGame, leaveGame, setGameStatus } from '@/lib/gamesApi';
+import PlayerProfileDialog from '@/components/PlayerProfileDialog';
 
 export default function GameDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { games, setGames, user } = useApp();
+
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
   const game = games.find((g) => g.id === id);
 
@@ -32,6 +37,11 @@ export default function GameDetail() {
 
   const isLive = game.status === 'live';
   const isFinished = game.status === 'finished';
+
+  const openProfile = (userId: string) => {
+    setSelectedUserId(userId);
+    setProfileOpen(true);
+  };
 
   const handleJoin = async () => {
     if (!user) {
@@ -139,7 +149,10 @@ export default function GameDetail() {
 
         {/* Host Info */}
         {game.host && (
-          <section className="glass-card p-4 flex items-center gap-4 animate-fade-in" style={{ animationDelay: '50ms' }}>
+          <section
+            className="glass-card p-4 flex items-center gap-4 animate-fade-in"
+            style={{ animationDelay: '50ms' }}
+          >
             <img
               src={game.host.profilePhotoUrl}
               alt={game.host.username}
@@ -224,15 +237,20 @@ export default function GameDetail() {
           </h3>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {game.players?.map((player) => (
-              <div key={player.id} className="flex items-center gap-2 glass-card p-2 pr-4">
+            {(game.players ?? []).map((player) => (
+              <button
+                key={player.id}
+                onClick={() => openProfile(player.id)}
+                className="flex items-center gap-2 glass-card p-2 pr-4 text-left hover:opacity-90"
+                type="button"
+              >
                 <img
                   src={player.profilePhotoUrl}
                   alt={player.username}
                   className="w-8 h-8 rounded-full object-cover"
                 />
                 <span className="text-sm font-medium truncate">{player.username}</span>
-              </div>
+              </button>
             ))}
 
             {Array.from({ length: Math.max(0, game.maxPlayers - game.playerIds.length) }).map((_, i) => (
@@ -243,6 +261,8 @@ export default function GameDetail() {
             ))}
           </div>
         </section>
+
+        <PlayerProfileDialog open={profileOpen} onOpenChange={setProfileOpen} userId={selectedUserId} />
       </main>
 
       {/* Action Bar */}
@@ -274,6 +294,14 @@ export default function GameDetail() {
               <Button variant="hero" size="xl" className="w-full" onClick={handleJoin}>
                 {game.isPrivate ? 'Request to Join' : 'Join Game'}
               </Button>
+            )}
+
+            {isHost && !isFinished && !isLive && (
+              <div className="mt-3">
+                <Button variant="hero" size="xl" className="w-full" onClick={handleGoLive}>
+                  Go Live
+                </Button>
+              </div>
             )}
           </div>
         </div>
