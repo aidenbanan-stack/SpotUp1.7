@@ -1,4 +1,3 @@
-
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
@@ -9,7 +8,7 @@ import { mockUsers } from '@/data/mockData';
 import { PostGameVoting } from '@/components/PostGameVoting';
 import { submitPostGameVotes } from '@/lib/gamesApi';
 
-function resolveUser(userId: any) {
+function resolveUser(userId) {
   return mockUsers.find((m) => m.id === userId);
 }
 
@@ -27,46 +26,47 @@ export default function PostGame() {
   const { games, setGames, user } = useApp();
   const [busy, setBusy] = useState(false);
 
-  const game = games.find(g => g.id === id);
+  const game = games.find((g) => g.id === id);
 
   const players = useMemo(() => {
     if (!game) return [];
     const ids = (game.checkedInIds?.length ? game.checkedInIds : game.playerIds) ?? [];
-    const resolved = ids.map(pid => resolveUser(pid)).filter(Boolean) as any[];
+    const resolved = ids.map((pid) => resolveUser(pid)).filter(Boolean);
     return resolved;
   }, [game]);
 
   const hasVotedAll = useMemo(() => {
     if (!game || !user) return false;
-    const rec = game.postGameVoters?.[user.id] ?? {};
+    const rec = (game.postGameVoters && game.postGameVoters[user.id]) ? game.postGameVoters[user.id] : {};
     const needed = Object.keys(CATEGORY_LABELS);
-    return needed.every(k => !!(rec as any)[k]);
+    return needed.every((k) => !!rec[k]);
   }, [game, user]);
 
   const voteResults = useMemo(() => {
-    if (!game?.postGameVotes) return null;
-    const results: Record<string, { userId: string; count: number } | null> = {};
-    for (const [cat, bucket] of Object.entries(game.postGameVotes as any)) {
-      const entries = Object.entries(bucket as Record<string, number>);
-      if (entries.length === 0) {
+    if (!game || !game.postGameVotes) return null;
+
+    const results = {};
+    for (const [cat, bucket] of Object.entries(game.postGameVotes)) {
+      const entries = Object.entries(bucket || {});
+      if (!entries.length) {
         results[cat] = null;
         continue;
       }
-      entries.sort((a, b) => b[1] - a[1]);
+      entries.sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
       results[cat] = { userId: entries[0][0], count: entries[0][1] };
     }
     return results;
   }, [game]);
 
-  const handleVoteComplete = async (votes: { category: string; votedUserId: string }[]) => {
+  const handleVoteComplete = async (votes) => {
     if (!user || !game) {
       toast.error('Please sign in first.');
       return;
     }
     try {
       setBusy(true);
-      const updated = await submitPostGameVotes(game.id, user.id, votes as any);
-      setGames(games.map(g => (g.id === game.id ? { ...g, ...updated } : g)));
+      const updated = await submitPostGameVotes(game.id, user.id, votes);
+      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
       toast.success('Votes submitted.');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to submit votes.';
@@ -89,7 +89,9 @@ export default function PostGame() {
               <AlertTriangle className="w-5 h-5 text-muted-foreground mt-0.5" />
               <div>
                 <div className="font-semibold">Game not found</div>
-                <div className="text-sm text-muted-foreground">It may have been deleted or you followed an invalid link.</div>
+                <div className="text-sm text-muted-foreground">
+                  It may have been deleted or you followed an invalid link.
+                </div>
               </div>
             </div>
           </div>
@@ -118,51 +120,18 @@ export default function PostGame() {
         <section className="rounded-2xl border border-border/50 bg-card p-5">
           <div className="text-lg font-bold text-foreground">{game.title}</div>
           <div className="text-sm text-muted-foreground mt-1">
-            Vote on who stood out. Results update as people submit.
+            Vote for players who stood out in each category.
           </div>
         </section>
 
-        {!!user ? (
-          <section className="rounded-2xl border border-border/50 bg-card p-5">
-            <PostGameVoting
-              game={game}
-              players={players}
-              currentUserId={user.id}
-              onVoteComplete={handleVoteComplete}
-            />
-            {busy && <div className="text-xs text-muted-foreground mt-2">Saving...</div>}
-            {hasVotedAll && (
-              <div className="text-sm text-muted-foreground mt-3">
-                You have already voted in all categories.
-              </div>
-            )}
-          </section>
-        ) : (
-          <section className="rounded-2xl border border-border/50 bg-card p-5">
-            <div className="text-sm text-muted-foreground">Please sign in to vote.</div>
-          </section>
-        )}
-
-        <section className="rounded-2xl border border-border/50 bg-card p-5">
-          <div className="font-semibold text-foreground">Current leaders</div>
-          <div className="mt-3 space-y-2">
-            {!voteResults ? (
-              <div className="text-sm text-muted-foreground">No votes yet.</div>
-            ) : (
-              Object.entries(CATEGORY_LABELS).map(([cat, label]) => {
-                const winner = (voteResults as any)[cat] as { userId: string; count: number } | null;
-                const name = winner ? (resolveUser(winner.userId)?.username ?? `Player ${winner.userId}`) : 'No votes';
-                const count = winner ? winner.count : 0;
-                return (
-                  <div key={cat} className="flex items-center justify-between rounded-xl border border-border/50 px-3 py-2">
-                    <div className="text-sm font-medium text-foreground">{label}</div>
-                    <div className="text-sm text-muted-foreground">{name}{winner ? ` (${count})` : ''}</div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </section>
+        <PostGameVoting
+          players={players}
+          categoryLabels={CATEGORY_LABELS}
+          hasVotedAll={hasVotedAll}
+          voteResults={voteResults}
+          onVoteComplete={handleVoteComplete}
+          disabled={busy}
+        />
       </main>
     </div>
   );
