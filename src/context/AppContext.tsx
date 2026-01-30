@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
-import { User, Sport, Game, Notification } from '@/types';
-import { mockGames, mockNotifications } from '@/data/mockData';
+import type { User, Sport, Game, Notification } from '@/types';
 import { fetchGames } from '@/lib/gamesApi';
 import { fetchMyNotifications } from '@/lib/notificationsApi';
 
@@ -17,88 +16,83 @@ interface AppContextType {
   gamesError: string | null;
   notifications: Notification[];
   setNotifications: (notifications: Notification[]) => void;
-  refreshNotifications: () => Promise<void>;
   unreadCount: number;
+  refreshNotifications: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  // User is loaded from Supabase auth + profiles in AuthGate.
   const [user, setUser] = useState<User | null>(null);
-  const [selectedSport, setSelectedSport] = useState<Sport | 'all'>('all');
-  const [games, setGames] = useState<Game[]>(mockGames);
-  const [gamesLoading, setGamesLoading] = useState<boolean>(true);
-  const [gamesError, setGamesError] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<Notification[]>(mockNotifications);
+  const isAuthenticated = !!user;
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const [selectedSport, setSelectedSport] = useState<Sport | 'all'>('all');
+
+  const [games, setGames] = useState<Game[]>([]);
+  const [gamesLoading, setGamesLoading] = useState<boolean>(false);
+  const [gamesError, setGamesError] = useState<string | null>(null);
+
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  const unreadCount = useMemo(() => notifications.filter(n => !n.read).length, [notifications]);
 
   const refreshGames = async () => {
     try {
-      setGamesError(null);
       setGamesLoading(true);
-      const dbGames = await fetchGames();
-      setGames(dbGames);
+      setGamesError(null);
+      const data = await fetchGames();
+      setGames(data);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load games from the database.';
-      setGamesError(message);
-      // Keep existing games (mock) so the UI is still usable.
+      const msg = err instanceof Error ? err.message : 'Failed to load games';
+      setGamesError(msg);
     } finally {
       setGamesLoading(false);
     }
   };
 
   const refreshNotifications = async () => {
+    if (!user) {
+      setNotifications([]);
+      return;
+    }
     try {
-      const db = await fetchMyNotifications(50);
-      setNotifications(db);
+      const data = await fetchMyNotifications();
+      setNotifications(data);
     } catch {
-      // Keep whatever is already in state (mock) if the table does not exist yet.
+      setNotifications([]);
     }
   };
 
   useEffect(() => {
-    // Load games from Supabase on startup. If env vars are missing, fetchGames will fail and
-    // the UI will fall back to mock data.
     void refreshGames();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    // When a real user is loaded, pull their notifications.
-    if (!user) return;
     void refreshNotifications();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  const value = useMemo(
-    () => ({
-      user,
-      setUser,
-      isAuthenticated: !!user,
-      selectedSport,
-      setSelectedSport,
-      games,
-      setGames,
-      refreshGames,
-      gamesLoading,
-      gamesError,
-      notifications,
-      setNotifications,
-      refreshNotifications,
-      unreadCount,
-    }),
-    [user, selectedSport, games, notifications, unreadCount, gamesLoading, gamesError]
-  );
+  const value: AppContextType = {
+    user,
+    setUser,
+    isAuthenticated,
+    selectedSport,
+    setSelectedSport,
+    games,
+    setGames,
+    refreshGames,
+    gamesLoading,
+    gamesError,
+    notifications,
+    setNotifications,
+    unreadCount,
+    refreshNotifications,
+  };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
 export function useApp() {
-  const context = useContext(AppContext);
-  if (!context) {
-    throw new Error('useApp must be used within AppProvider');
-  }
-  return context;
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useApp must be used within AppProvider');
+  return ctx;
 }
