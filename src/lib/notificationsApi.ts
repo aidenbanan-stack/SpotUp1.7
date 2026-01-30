@@ -41,3 +41,27 @@ export async function fetchMyNotifications(limit = 50): Promise<Notification[]> 
   if (error) throw error;
   return (data as NotificationRow[]).map(rowToNotification);
 }
+
+/**
+ * Mark a single notification as read.
+ */
+export async function markNotificationRead(notificationId: string): Promise<void> {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ read: true })
+    .eq('id', notificationId);
+
+  if (error) throw error;
+}
+
+/**
+ * Delete a notification (used after accepting/rejecting requests).
+ */
+export async function deleteNotification(notificationId: string): Promise<void> {
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('id', notificationId);
+
+  if (error) throw error;
+}
