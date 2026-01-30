@@ -19,8 +19,8 @@ export async function rejectFriendRequest(fromUserId: string): Promise<void> {
 
 type FriendRequestRow = {
   id: string;
-  from_user_id: string;
-  to_user_id: string;
+  user_id: string;
+  friend_id: string;
   status: 'pending' | 'accepted' | 'rejected';
   created_at?: string;
 };
@@ -35,19 +35,19 @@ export async function fetchMyFriendIds(): Promise<string[]> {
   const me = auth.user;
   if (!me) throw new Error('Not signed in.');
 
-  const { data, error } = await supabase
+ const { data, error } = await supabase
     .from('friend_requests')
-    .select('id,from_user_id,to_user_id,status')
+    .select('id,user_id,friend_id,status')
     .eq('status', 'accepted')
-    // NOTE: `.or` uses a comma-separated expression string.
-    .or(`from_user_id.eq.${me.id},to_user_id.eq.${me.id}`);
+    .or(`user_id.eq.${me.id},friend_id.eq.${me.id}`);
+
 
   if (error) throw error;
   const rows = (data ?? []) as FriendRequestRow[];
 
-  const friendIds = rows
-    .map((r) => (r.from_user_id === me.id ? r.to_user_id : r.from_user_id))
-    .filter((id) => id && id !== me.id);
+    const friendIds = rows
+    .map((r: any) => (r.user_id === me.id ? r.friend_id : r.user_id))
+    .filter((id: string) => id && id !== me.id);
 
   return Array.from(new Set(friendIds));
 }
