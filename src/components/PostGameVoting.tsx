@@ -1,28 +1,33 @@
 import { useState } from 'react';
-import { User, Game } from '@/types';
+import type { User, Game } from '@/types';
 import { Button } from '@/components/ui/button';
-import { Trophy, Shield, Users, Check } from 'lucide-react';
+import { Trophy, Shield, Users as UsersIcon, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+
+type VoteCategory =
+  | 'best_shooter'
+  | 'best_passer'
+  | 'best_all_around'
+  | 'best_scorer'
+  | 'best_defender';
 
 interface PostGameVotingProps {
   game: Game;
   players: User[];
   currentUserId: string;
-  onVoteComplete: (votes: { category: string; votedUserId: string }[]) => void;
+  onVoteComplete: (votes: { category: VoteCategory; votedUserId: string }[]) => void;
 }
 
-type VoteCategory = 'best_scorer' | 'best_defender' | 'best_passer';
-
-const VOTE_CATEGORIES: { id: VoteCategory; name: string; icon: typeof Trophy; description: string }[] = [
+const VOTE_CATEGORIES: { id: VoteCategory; name: string; icon: any; description: string }[] = [
   { id: 'best_shooter', name: 'Best Shooter', icon: Trophy, description: 'Knocked down the most shots' },
-  { id: 'best_passer', name: 'Best Passer', icon: Users, description: 'Created the most looks for others' },
+  { id: 'best_passer', name: 'Best Passer', icon: UsersIcon, description: 'Created the most looks for others' },
   { id: 'best_all_around', name: 'Best All-Around', icon: Trophy, description: 'Impact on both ends' },
   { id: 'best_scorer', name: 'Best Scorer', icon: Trophy, description: 'Got buckets all game' },
   { id: 'best_defender', name: 'Best Defender', icon: Shield, description: 'Lockdown defense' },
 ];
 
-export function PostGameVoting({ game, players, currentUserId, onVoteComplete }: PostGameVotingProps) {
+export function PostGameVoting({ players, currentUserId, onVoteComplete }: PostGameVotingProps) {
   const [votes, setVotes] = useState<Record<VoteCategory, string | null>>({
     best_shooter: null,
     best_passer: null,
@@ -30,6 +35,7 @@ export function PostGameVoting({ game, players, currentUserId, onVoteComplete }:
     best_scorer: null,
     best_defender: null,
   });
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const eligiblePlayers = players.filter(p => p.id !== currentUserId);
@@ -42,7 +48,7 @@ export function PostGameVoting({ game, players, currentUserId, onVoteComplete }:
   };
 
   const handleSubmit = () => {
-    const submittedVotes = Object.entries(votes)
+    const submittedVotes = (Object.entries(votes) as [VoteCategory, string | null][])
       .filter(([_, userId]) => userId !== null)
       .map(([category, votedUserId]) => ({ category, votedUserId: votedUserId! }));
 
@@ -53,18 +59,13 @@ export function PostGameVoting({ game, players, currentUserId, onVoteComplete }:
 
     setIsSubmitting(true);
     onVoteComplete(submittedVotes);
-    toast.success('Votes submitted! +10 XP earned');
   };
-
-  const allVotesComplete = Object.values(votes).every(v => v !== null);
 
   return (
     <div className="glass-card p-5 space-y-5">
       <div className="text-center">
         <h3 className="text-lg font-bold text-foreground mb-1">Post-Game Voting</h3>
-        <p className="text-sm text-muted-foreground">
-          Who stood out in today's game?
-        </p>
+        <p className="text-sm text-muted-foreground">Who stood out in today’s game?</p>
       </div>
 
       <div className="space-y-4">
@@ -75,10 +76,12 @@ export function PostGameVoting({ game, players, currentUserId, onVoteComplete }:
               <span className="font-medium text-foreground">{name}</span>
               <span className="text-xs text-muted-foreground">- {description}</span>
             </div>
+
             <div className="flex flex-wrap gap-2">
               {eligiblePlayers.map(player => (
                 <button
                   key={player.id}
+                  type="button"
                   onClick={() => handleVote(id, player.id)}
                   className={cn(
                     'flex items-center gap-2 px-3 py-2 rounded-xl transition-all',
@@ -108,11 +111,8 @@ export function PostGameVoting({ game, players, currentUserId, onVoteComplete }:
           variant="hero"
           className="w-full"
         >
-          {allVotesComplete ? 'Submit All Votes (+15 XP)' : 'Submit Votes (+10 XP)'}
+          Submit votes
         </Button>
-        <p className="text-xs text-center text-muted-foreground mt-2">
-          Voting helps players earn XP and badges!
-        </p>
       </div>
     </div>
   );
