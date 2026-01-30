@@ -1,13 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { mockUsers } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
 import { PLAYER_LEVELS, SPORTS, Sport, User } from '@/types';
+import { fetchMyFriends } from '@/lib/socialApi';
 
 type SportFilter = Sport | 'all';
 
@@ -25,10 +24,38 @@ function levelForXP(xp: number) {
 
 export function XPRoadDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [sportFilter, setSportFilter] = useState<SportFilter>('all');
-
   const { user } = useApp();
-  const me = user ?? mockUsers[0];
-  const friends = useMemo(() => mockUsers.filter(u => u.id !== me.id), [me.id]);
+
+  const [friends, setFriends] = useState<User[]>([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const load = async () => {
+      if (!open || !user) return;
+      setFriendsLoading(true);
+      try {
+        const f = await fetchMyFriends();
+        if (!mounted) return;
+        setFriends(f.filter(x => x.id !== user.id));
+      } catch {
+        if (!mounted) return;
+        setFriends([]);
+      } finally {
+        if (mounted) setFriendsLoading(false);
+      }
+    };
+
+    void load();
+    return () => {
+      mounted = false;
+    };
+  }, [open, user?.id]);
+
+  if (!user) return null;
+
+  const me = user;
 
   const myXP = useMemo(() => xpForSport(me, sportFilter), [me, sportFilter]);
   const myLevel = useMemo(() => levelForXP(myXP), [myXP]);
@@ -68,7 +95,8 @@ export function XPRoadDialog({ open, onOpenChange }: { open: boolean; onOpenChan
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(92vw,720px)] max-w-none p-0 overflow-hidden">
+      {/* max-h + overflow fixes mobile "stuck" dialogs */}
+      <DialogContent className="w-[min(92vw,720px)] max-w-none p-0 max-h-[90vh] overflow-hidden">
         <DialogHeader className="px-5 pt-5 pb-3 border-b border-border/50">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -86,125 +114,87 @@ export function XPRoadDialog({ open, onOpenChange }: { open: boolean; onOpenChan
                   <SelectItem value="all">All sports</SelectItem>
                   {SPORTS.map(s => (
                     <SelectItem key={s.id} value={s.id}>
-                      {s.icon} {s.name}
+                      {s.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
+        </DialogHeader>
 
-          <div className="mt-4 flex items-center gap-3">
-            <Avatar className="w-10 h-10">
-              <AvatarImage src={me.profilePhotoUrl} alt={me.username} />
-              <AvatarFallback>{me.username.slice(0, 2).toUpperCase()}</AvatarFallback>
-            </Avatar>
-            <div className="flex-1">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-foreground">{me.username}</span>
-                  <Badge variant="secondary" className="rounded-full">#{myPlacement}</Badge>
+        {/* Use a normal div scroll container instead of ScrollArea */}
+        <div className="px-5 pb-5 pt-4 overflow-y-auto overscroll-contain" style={{ maxHeight: 'calc(90vh - 84px)' }}>
+          <div className="glass-card p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <Avatar className="w-12 h-12">
+                  <AvatarImage src={me.profilePhotoUrl} alt={me.username} />
+                  <AvatarFallback>{me.username.slice(0, 2).toUpperCase()}</AvatarFallback>
+                </Avatar>
+                <div>
+                  <p className="font-bold text-foreground">{me.username}</p>
+                  <p className="text-sm text-muted-foreground">
+                    Rank #{myPlacement} among friends
+                  </p>
                 </div>
-                <span className="text-sm font-semibold text-foreground">{myXP.toLocaleString()} XP</span>
               </div>
-              <div className="mt-2">
-                <div className="h-2 bg-secondary rounded-full overflow-hidden">
-                  <div className="h-full bg-primary rounded-full" style={{ width: `${Math.round(progressToNext * 100)}%` }} />
-                </div>
-                <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{myLevel.icon} {myLevel.name}</span>
-                  <span>
-                    {nextLevel ? `${Math.max(0, nextLevel.minXP - myXP)} XP to ${nextLevel.name} ${nextLevel.icon}` : 'Max rank'}
-                  </span>
-                </div>
+
+              <div className="text-right">
+                <p className="text-sm text-muted-foreground">XP</p>
+                <p className="text-xl font-extrabold text-foreground">{myXP.toLocaleString()}</p>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">{myLevel.name}</span>
+                {nextLevel ? (
+                  <span className="text-muted-foreground">{nextLevel.name}</span>
+                ) : (
+                  <span className="text-muted-foreground">Max</span>
+                )}
+              </div>
+              <div className="h-3 rounded-full bg-secondary mt-2 overflow-hidden">
+                <div className="h-full bg-primary" style={{ width: `${progressToNext * 100}%` }} />
               </div>
             </div>
           </div>
-        </DialogHeader>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-0 min-w-0">
-          {/* Trophy road */}
-          <div className="border-b md:border-b-0 md:border-r border-border/50 min-w-0">
-            <div className="px-5 py-4">
-              <h4 className="text-sm font-semibold text-muted-foreground">TROPHY ROAD</h4>
+          <div className="mt-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-foreground">Friends</h3>
+              {friendsLoading && <span className="text-xs text-muted-foreground">Loading…</span>}
             </div>
-            <ScrollArea className="h-[420px]">
-              <div className="px-5 pb-5 space-y-3">
-                {PLAYER_LEVELS.map((lvl) => {
-                  const isCurrent = myXP >= lvl.minXP && (!nextLevel || lvl.id === myLevel.id);
-                  const reached = myXP >= lvl.minXP;
-                  const milestoneFriends = friendsRanked
-                    .filter(p => levelForXP(p.xp).id === lvl.id)
-                    .slice(0, 4);
 
+            {friends.length === 0 ? (
+              <div className="glass-card p-5 text-center">
+                <p className="font-semibold">No friends yet</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Add friends to compare XP here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {friendsRanked.map(({ user: u, xp }, idx) => {
+                  const lvl = levelForXP(xp);
                   return (
-                    <div
-                      key={lvl.id}
-                      className={cn(
-                        'glass-card p-4 flex items-start gap-3',
-                        isCurrent && 'border border-primary/40 shadow-glow'
-                      )}
-                    >
-                      <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center text-lg', reached ? 'bg-primary/15' : 'bg-secondary/60')}>
-                        <span>{lvl.icon}</span>
+                    <div key={u.id} className={cn('glass-card p-3 flex items-center gap-3')}>
+                      <div className="w-7 text-center font-bold text-muted-foreground">{idx + 1}</div>
+                      <Avatar className="w-10 h-10">
+                        <AvatarImage src={u.profilePhotoUrl} alt={u.username} />
+                        <AvatarFallback>{u.username.slice(0, 2).toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-foreground truncate">{u.username}</p>
+                        <p className="text-xs text-muted-foreground truncate">{lvl.name}</p>
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="font-semibold text-foreground">{lvl.name}</p>
-                          <p className="text-xs text-muted-foreground">{lvl.minXP.toLocaleString()} XP</p>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {reached ? 'Unlocked' : 'Reach this milestone to unlock'}
-                        </p>
-
-                        {milestoneFriends.length > 0 && (
-                          <div className="mt-3 flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">Friends here:</span>
-                            <div className="flex -space-x-2">
-                              {milestoneFriends.map(p => (
-                                <Avatar key={p.user.id} className="w-7 h-7 border border-background">
-                                  <AvatarImage src={p.user.profilePhotoUrl} alt={p.user.username} />
-                                  <AvatarFallback>{p.user.username.slice(0, 2).toUpperCase()}</AvatarFallback>
-                                </Avatar>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                      <Badge variant="secondary">{xp.toLocaleString()} XP</Badge>
                     </div>
                   );
                 })}
               </div>
-            </ScrollArea>
-          </div>
-
-          {/* Friends leaderboard */}
-          <div className="min-w-0">
-            <div className="px-5 py-4">
-              <h4 className="text-sm font-semibold text-muted-foreground">FRIENDS</h4>
-              <p className="text-xs text-muted-foreground mt-1">Mock data for now. This will come from real friends later.</p>
-            </div>
-            <ScrollArea className="h-[420px]">
-              <div className="px-5 pb-5 space-y-3">
-                {allRanked.map((p, idx) => (
-                  <div key={p.user.id} className={cn('glass-card p-4 flex items-center gap-3', p.user.id === me.id && 'border border-primary/40')}>
-                    <div className="w-8 text-center font-bold text-muted-foreground">{idx + 1}</div>
-                    <Avatar className="w-9 h-9">
-                      <AvatarImage src={p.user.profilePhotoUrl} alt={p.user.username} />
-                      <AvatarFallback>{p.user.username.slice(0, 2).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <p className="font-semibold text-foreground">{p.user.username}</p>
-                      <p className="text-xs text-muted-foreground">{levelForXP(p.xp).icon} {levelForXP(p.xp).name}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold text-foreground">{p.xp.toLocaleString()}</p>
-                      <p className="text-xs text-muted-foreground">XP</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
+            )}
           </div>
         </div>
       </DialogContent>
