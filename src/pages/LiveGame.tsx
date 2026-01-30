@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { SportBadge } from '@/components/SportIcon';
 import { ArrowLeft, Users, CheckCircle2, Clock, Play, Pause, Flag, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
-import { endGame, setRunsStarted, toggleCheckIn } from '@/lib/gamesApi';
+import { endGame, fetchGameById, setRunsStarted, toggleCheckIn } from '@/lib/gamesApi';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function LiveGame() {
   const { id } = useParams();
@@ -18,6 +19,31 @@ export default function LiveGame() {
   const isHost = useMemo(() => !!user && !!game && game.hostId === user.id, [user, game]);
   const isJoined = useMemo(() => !!user && !!game && game.playerIds.includes(user.id), [user, game]);
   const isCheckedIn = useMemo(() => !!user && !!game && game.checkedInIds.includes(user.id), [user, game]);
+
+  // Realtime: when host ends game, everyone gets the update
+  useEffect(() => {
+    if (!id) return;
+
+    const channel = supabase
+      .channel(`game:${id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${id}` },
+        async () => {
+          try {
+            const fresh = await fetchGameById(id);
+            setGames(prev => prev.map(g => (g.id === id ? fresh : g)));
+          } catch {
+            // ignore
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [id, setGames]);
 
   const checkedInIds = game?.checkedInIds ?? [];
   const signedUpIds = game?.playerIds ?? [];
@@ -83,146 +109,123 @@ export default function LiveGame() {
 
   if (!game) {
     return (
-      <div className="min-h-screen bg-background p-6">
+      <div className="min-h-screen bg-background p-6 safe-top">
         <div className="max-w-lg mx-auto space-y-4">
-          <Button variant="ghost" onClick={() => navigate(-1)} className="gap-2">
-            <ArrowLeft className="w-4 h-4" />
+          <Button variant="ghost" onClick={() => navigate(-1)}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
-          <div className="rounded-2xl border border-border/50 p-5 bg-card">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-muted-foreground mt-0.5" />
-              <div>
-                <div className="font-semibold">Game not found</div>
-                <div className="text-sm text-muted-foreground">It may have been deleted or you followed an invalid link.</div>
-              </div>
-            </div>
+          <div className="glass-card p-6 text-center">
+            <AlertTriangle className="w-6 h-6 mx-auto text-muted-foreground" />
+            <p className="mt-2 font-semibold">Game not found</p>
+            <p className="text-sm text-muted-foreground mt-1">It may have been deleted.</p>
           </div>
         </div>
       </div>
     );
   }
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-background p-6">
-        <div className="max-w-lg mx-auto space-y-4">
-          <Button variant="ghost" onClick={() => navigate(`/game/${game.id}`)} className="gap-2">
-            <ArrowLeft className="w-4 h-4" />
-            Game
-          </Button>
-          <div className="glass-card p-5">
-            <div className="font-semibold">Please sign in</div>
-            <div className="text-sm text-muted-foreground">You need an account to view the live session.</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isHost && !isJoined) {
-    return (
-      <div className="min-h-screen bg-background p-6">
-        <div className="max-w-lg mx-auto space-y-4">
-          <Button variant="ghost" onClick={() => navigate(`/game/${game.id}`)} className="gap-2">
-            <ArrowLeft className="w-4 h-4" />
-            Game
-          </Button>
-          <div className="glass-card p-5">
-            <div className="font-semibold">Not allowed</div>
-            <div className="text-sm text-muted-foreground">Only the host and joined players can view the live session.</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const showPostGameCTA = game.status === 'finished';
 
   return (
     <div className="min-h-screen bg-background pb-24 safe-top">
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/50">
-        <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
-          <Button variant="ghost" onClick={() => navigate(`/game/${game.id}`)} className="gap-2 -ml-2">
-            <ArrowLeft className="w-4 h-4" />
-            Game
-          </Button>
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between px-4 py-3">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-secondary/60" aria-label="Back">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="flex items-center gap-2 min-w-0">
             <SportBadge sport={game.sport} />
-            <span className="text-sm font-medium text-foreground">Live</span>
+            <h1 className="text-lg font-bold truncate">{game.title}</h1>
           </div>
-          <div className="w-[72px]" />
+          <div className="w-10" />
         </div>
       </header>
 
-      <main className="max-w-lg mx-auto px-4 pt-4 space-y-4">
-        <section className="rounded-2xl border border-border/50 bg-card p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
-              <div className="text-lg font-bold text-foreground">{game.title}</div>
-              <div className="text-sm text-muted-foreground flex items-center gap-2">
-                <Clock className="w-4 h-4" />
-                {game.runsStarted ? 'Runs started' : 'Runs not started'}
-              </div>
-            </div>
-
-            <div className="flex flex-col items-end gap-2">
-              {isHost ? (
-                <Button onClick={handleRunsToggle} disabled={busy} variant={game.runsStarted ? 'secondary' : 'hero'} className="gap-2">
-                  {game.runsStarted ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                  {game.runsStarted ? 'Pause' : 'Start'}
-                </Button>
-              ) : (
-                <div className="text-xs text-muted-foreground">Host controls runs</div>
-              )}
-            </div>
+      <main className="px-4 py-6 max-w-2xl mx-auto space-y-4">
+        {showPostGameCTA && (
+          <div className="glass-card p-4">
+            <p className="font-semibold text-foreground">Game ended</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Postgame voting is open for everyone who played.
+            </p>
+            <Button
+              className="mt-3 w-full"
+              variant="hero"
+              onClick={() => navigate(`/game/${game.id}/postgame`)}
+            >
+              Go to voting
+            </Button>
           </div>
-        </section>
+        )}
 
-        <section className="rounded-2xl border border-border/50 bg-card p-5">
+        <div className="glass-card p-5 space-y-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Users className="w-4 h-4 text-primary" />
-              <div className="font-semibold">Check-in</div>
-            </div>
-            <Button onClick={handleCheckInToggle} disabled={busy} variant={isCheckedIn ? 'secondary' : 'hero'} className="gap-2">
-              <CheckCircle2 className="w-4 h-4" />
+            <p className="font-semibold text-foreground">Status</p>
+            <p className="text-sm text-muted-foreground">
+              {game.status === 'live' ? 'Live' : game.status === 'finished' ? 'Finished' : 'Scheduled'}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <p className="font-semibold text-foreground">Check-in</p>
+            <Button
+              variant={isCheckedIn ? 'secondary' : 'hero'}
+              onClick={handleCheckInToggle}
+              disabled={busy}
+            >
+              <CheckCircle2 className="w-4 h-4 mr-2" />
               {isCheckedIn ? 'Checked in' : 'Check in'}
             </Button>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-2">
-            {checkedInIds.map((pid) => (
-              <div key={pid} className="flex items-center justify-between rounded-xl border border-border/50 p-3">
-                <div className="font-medium">{resolveName(pid)}</div>
-                <div className="text-xs text-emerald-600 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" />
-                  Here
-                </div>
-              </div>
-            ))}
-
-            {notCheckedInIds.map((pid) => (
-              <div key={pid} className="flex items-center justify-between rounded-xl border border-border/50 p-3 opacity-70">
-                <div className="font-medium">{resolveName(pid)}</div>
-                <div className="text-xs text-muted-foreground">Not checked in</div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {isHost && (
-          <section className="rounded-2xl border border-border/50 bg-card p-5">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold">End game</div>
-              <Button onClick={handleEndGame} disabled={busy} variant="destructive" className="gap-2">
-                <Flag className="w-4 h-4" />
-                End
+          {isHost && (
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={handleRunsToggle} disabled={busy}>
+                {game.runsStarted ? <Pause className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
+                {game.runsStarted ? 'Pause runs' : 'Start runs'}
+              </Button>
+              <Button variant="destructive" className="flex-1" onClick={handleEndGame} disabled={busy || game.status === 'finished'}>
+                <Flag className="w-4 h-4 mr-2" />
+                End game
               </Button>
             </div>
-            <div className="text-xs text-muted-foreground mt-2">
-              This will end the live session and open postgame voting.
+          )}
+        </div>
+
+        <div className="glass-card p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Users className="w-4 h-4" />
+            <p className="font-semibold">Checked in ({checkedInIds.length})</p>
+          </div>
+          {checkedInIds.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No one checked in yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {checkedInIds.map(pid => (
+                <div key={pid} className="flex items-center justify-between">
+                  <p className="text-sm">{resolveName(pid)}</p>
+                  <Clock className="w-4 h-4 text-muted-foreground" />
+                </div>
+              ))}
             </div>
-          </section>
-        )}
+          )}
+        </div>
+
+        <div className="glass-card p-5">
+          <p className="font-semibold mb-3">Not checked in ({notCheckedInIds.length})</p>
+          {notCheckedInIds.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Everyone is checked in.</p>
+          ) : (
+            <div className="space-y-2">
+              {notCheckedInIds.map(pid => (
+                <div key={pid} className="text-sm text-muted-foreground">
+                  {resolveName(pid)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </main>
     </div>
   );
