@@ -88,6 +88,19 @@ export async function fetchGames(): Promise<Game[]> {
   return await Promise.all(base.map(hydrateGame));
 }
 
+export async function fetchGameById(gameId: string): Promise<Game> {
+  const { data, error } = await supabase
+    .from('games')
+    .select('*')
+    .eq('id', gameId)
+    .single();
+
+  if (error) throw error;
+
+  const base = rowToGame(data as GameRow);
+  return await hydrateGame(base);
+}
+
 export type CreateGameInput = Omit<
   Game,
   'id' | 'createdAt' | 'host' | 'players' | 'postGameVotes' | 'completedAt'
