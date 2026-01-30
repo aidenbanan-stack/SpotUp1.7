@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { acceptFriendRequest, rejectFriendRequest } from '@/lib/socialApi';
 import { fetchProfileById } from '@/lib/profileApi';
 import { toast } from 'sonner';
+import { deleteNotification, markNotificationRead } from '@/lib/notificationsApi';
 
 export default function Notifications() {
   const navigate = useNavigate();
@@ -52,7 +53,10 @@ export default function Notifications() {
 
   const markAsReadLocal = (id: string) => {
     setNotifications(notifications.map(n => (n.id === id ? { ...n, read: true } : n)));
-  };
+    // Best-effort sync to DB.
+    void markNotificationRead(id).catch(() => undefined);
+};
+
 
   const markAllAsRead = () => {
     setNotifications(notifications.map(n => ({ ...n, read: true })));
@@ -74,26 +78,35 @@ export default function Notifications() {
   };
 
   const handleAccept = async (notifId: string, fromUserId: string) => {
-    try {
-      await acceptFriendRequest(fromUserId);
-      markAsReadLocal(notifId);
-      toast.success('Friend request accepted.');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to accept request.';
-      toast.error(msg);
-    }
-  };
+  try {
+    await acceptFriendRequest(fromUserId);
+
+    // Remove immediately so it disappears after action
+    setNotifications((prev) => prev.filter((n) => n.id !== notifId));
+
+    // Remove from DB too
+    await deleteNotification(notifId);
+
+    toast.success('Friend request accepted.');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to accept request.';
+    toast.error(msg);
+  }
+};
 
   const handleReject = async (notifId: string, fromUserId: string) => {
-    try {
-      await rejectFriendRequest(fromUserId);
-      markAsReadLocal(notifId);
-      toast.success('Friend request rejected.');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to reject request.';
-      toast.error(msg);
-    }
-  };
+  try {
+    await rejectFriendRequest(fromUserId);
+
+    setNotifications((prev) => prev.filter((n) => n.id !== notifId));
+    await deleteNotification(notifId);
+
+    toast.success('Friend request rejected.');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to reject request.';
+    toast.error(msg);
+  }
+};
 
   return (
     <div className="min-h-screen bg-background pb-24 safe-top">
