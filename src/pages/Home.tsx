@@ -7,7 +7,7 @@ import { XPRoadDialog } from '@/components/XPRoadDialog';
 import { Bell, MapPin, Plus, User, History, MessageCircle, Users2 } from 'lucide-react';
 import { SPORTS, Sport } from '@/types';
 
-import spotupLogo from '@/assets/SpotUpLogo.png';
+import spotupLogo from '@/assets/SpotUpLogoOld.png';
 
 type SportFilter = Sport | 'all';
 
