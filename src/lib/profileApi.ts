@@ -112,3 +112,19 @@ export async function fetchProfilesByIds(ids: string[]): Promise<User[]> {
   if (error) throw error;
   return (data ?? []).map((row) => profileToUser(row as ProfileRow));
 }
+
+
+export async function searchProfiles(search: string, limit = 20): Promise<User[]> {
+  const q = (search || '').trim();
+  if (!q) return [];
+
+  const like = `%${q}%`;
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id,email,username,profile_photo_url')
+    .or(`username.ilike.${like},email.ilike.${like}`)
+    .limit(limit);
+
+  if (error) throw error;
+  return (data ?? []).map(profileToUser);
+}
