@@ -2,6 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { GameCard } from '@/components/GameCard';
 import { XPRoadDialog } from '@/components/XPRoadDialog';
 import { Bell, MapPin, Plus, User, History, MessageCircle, Users2 } from 'lucide-react';
