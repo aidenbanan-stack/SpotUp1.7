@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SportGrid } from '@/components/SportSelector';
 import { Sport, SkillLevel, SKILL_LEVELS, User } from '@/types';
-import spotupLogo from '@/assets/spotup-logo.png';
+import spotupLogo from '@/assets/SpotUpLogoOld.png';
 import { ArrowLeft, ArrowRight, Camera, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
