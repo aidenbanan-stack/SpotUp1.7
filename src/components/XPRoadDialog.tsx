@@ -53,45 +53,51 @@ export function XPRoadDialog({ open, onOpenChange }: { open: boolean; onOpenChan
     };
   }, [open, user?.id]);
 
-  if (!user) return null;
-
   const me = user;
 
-  const myXP = useMemo(() => xpForSport(me, sportFilter), [me, sportFilter]);
-  const myLevel = useMemo(() => levelForXP(myXP), [myXP]);
+const myXP = useMemo(() => {
+  if (!me) return 0;
+  return xpForSport(me, sportFilter);
+}, [me, sportFilter]);
 
-  const friendsRanked = useMemo(() => {
-    return [...friends]
-      .map(u => ({ user: u, xp: xpForSport(u, sportFilter) }))
-      .sort((a, b) => b.xp - a.xp);
-  }, [friends, sportFilter]);
+const myLevel = useMemo(() => levelForXP(myXP), [myXP]);
 
-  const allRanked = useMemo(() => {
-    const everyone = [{ user: me, xp: myXP }, ...friendsRanked];
-    return everyone.sort((a, b) => b.xp - a.xp);
-  }, [friendsRanked, me, myXP]);
+const friendsRanked = useMemo(() => {
+  return [...friends]
+    .map(u => ({ user: u, xp: xpForSport(u, sportFilter) }))
+    .sort((a, b) => b.xp - a.xp);
+}, [friends, sportFilter]);
 
-  const myPlacement = useMemo(() => {
-    const idx = allRanked.findIndex(p => p.user.id === me.id);
-    return idx >= 0 ? idx + 1 : 1;
-  }, [allRanked, me.id]);
+const allRanked = useMemo(() => {
+  if (!me) return [];
+  const everyone = [{ user: me, xp: myXP }, ...friendsRanked];
+  return everyone.sort((a, b) => b.xp - a.xp);
+}, [friendsRanked, me, myXP]);
 
-  const nextLevel = useMemo(() => {
-    const idx = PLAYER_LEVELS.findIndex(l => l.id === myLevel.id);
-    return PLAYER_LEVELS[idx + 1];
-  }, [myLevel.id]);
+const myPlacement = useMemo(() => {
+  if (!me) return 1;
+  const idx = allRanked.findIndex(p => p.user.id === me.id);
+  return idx >= 0 ? idx + 1 : 1;
+}, [allRanked, me]);
 
-  const progressToNext = useMemo(() => {
-    if (!nextLevel) return 1;
-    const span = nextLevel.minXP - myLevel.minXP;
-    if (span <= 0) return 1;
-    return Math.min(1, Math.max(0, (myXP - myLevel.minXP) / span));
-  }, [myXP, myLevel.minXP, nextLevel]);
+const nextLevel = useMemo(() => {
+  const idx = PLAYER_LEVELS.findIndex(l => l.id === myLevel.id);
+  return PLAYER_LEVELS[idx + 1];
+}, [myLevel.id]);
 
-  const sportLabel = useMemo(() => {
-    if (sportFilter === 'all') return 'All sports';
-    return SPORTS.find(s => s.id === sportFilter)?.name ?? 'Sport';
-  }, [sportFilter]);
+const progressToNext = useMemo(() => {
+  if (!nextLevel) return 1;
+  const span = nextLevel.minXP - myLevel.minXP;
+  if (span <= 0) return 1;
+  return Math.min(1, Math.max(0, (myXP - myLevel.minXP) / span));
+}, [myXP, myLevel.minXP, nextLevel]);
+
+const sportLabel = useMemo(() => {
+  if (sportFilter === 'all') return 'All sports';
+  return SPORTS.find(s => s.id === sportFilter)?.name ?? 'Sport';
+}, [sportFilter]);
+
+if (!me) return null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
