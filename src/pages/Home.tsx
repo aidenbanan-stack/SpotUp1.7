@@ -139,7 +139,7 @@ export default function Home() {
               <MapPin className="w-4 h-4 mr-2" />
               Map
             </Button>
-            <Button variant="hero" onClick={() => navigate('/create')} className="rounded-xl">
+            <Button variant="hero" onClick={() => navigate('/create-game')} className="rounded-xl">
               <Plus className="w-4 h-4 mr-2" />
               Host
             </Button>
