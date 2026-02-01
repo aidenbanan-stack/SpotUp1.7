@@ -248,10 +248,11 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
     .from('conversation_members')
     .select('conversation_id')
     .eq('user_id', me.id);
-  console.log('[DEBUG] conversation_members:', members);
 
+  console.log('[DEBUG] mems (my memberships):', mems);
 
   if (memErr) throw memErr;
+
   const conversationIds = Array.from(new Set((mems ?? []).map((r: any) => r.conversation_id)));
   if (!conversationIds.length) return [];
 
@@ -260,14 +261,16 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
     .select('conversation_id,user_id')
     .in('conversation_id', conversationIds);
 
+  console.log('[DEBUG] members (all members):', members);
+
   if (allMemErr) throw allMemErr;
 
   const otherByConv: Record<string, string> = {};
   (members ?? []).forEach((r: any) => {
     if (r.user_id !== me.id) otherByConv[r.conversation_id] = r.user_id;
   });
-  console.log('[DEBUG] otherByConv:', otherByConv);
 
+  console.log('[DEBUG] otherByConv:', otherByConv);
 
   const otherIds = Array.from(
     new Set(Object.values(otherByConv).filter((v): v is string => typeof v === 'string' && v.length > 0))
@@ -283,6 +286,7 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
     .limit(200);
 
   if (msgErr) throw msgErr;
+
   const lastByConv: Record<string, any> = {};
   (msgs ?? []).forEach((m: any) => {
     if (!lastByConv[m.conversation_id]) lastByConv[m.conversation_id] = m;
@@ -290,7 +294,7 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
 
   return conversationIds.map((id) => {
     const otherId = otherByConv[id];
-    const p = (otherId && byId[otherId]) ? byId[otherId] : { username: 'player', profile_photo_url: cleanPhoto('') };
+    const p = otherId && byId[otherId] ? byId[otherId] : { username: 'player', profile_photo_url: cleanPhoto('') };
     const last = lastByConv[id];
 
     return {
@@ -298,7 +302,7 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
       createdAt: new Date(),
       otherUserId: otherId,
       otherUsername: p.username || 'player',
-      otherPhotoUrl: p.profile_photo_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup',
+      otherPhotoUrl: p.profile_photo_url || cleanPhoto(''),
       lastMessage: last ? { body: last.body ?? '', createdAt: new Date(last.created_at) } : undefined,
     };
   });
