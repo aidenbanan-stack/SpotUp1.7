@@ -178,21 +178,6 @@ export type UpdateMyProfileInput = {
   onboardingCompleted?: boolean;
 };
 
-import { supabase } from '@/lib/supabase';
-import type { Sport } from '@/types';
-
-type UpdateMyProfileInput = {
-  username?: string;
-  bio?: string;
-  age?: number;
-  height?: string;
-  city?: string;
-  primarySport?: Sport;
-  secondarySports?: Sport[];
-  profilePhotoUrl?: string;
-  onboardingCompleted?: boolean;
-};
-
 export async function updateMyProfile(input: UpdateMyProfileInput) {
   const { data: authData, error: authErr } = await supabase.auth.getUser();
   if (authErr || !authData?.user) throw new Error('Not signed in');
