@@ -214,19 +214,8 @@ export async function updateMyProfile(input: UpdateMyProfileInput) {
 
   if (error) throw new Error(error.message);
 
-  // Return in app-friendly shape (match your existing user shape)
-  return {
-    id: data.id,
-    email: data.email,
-    username: data.username,
-    profilePhotoUrl: data.profile_photo_url,
-    city: data.city,
-    bio: data.bio,
-    age: data.age,
-    height: data.height,
-    primarySport: data.primary_sport,
-    secondarySports: data.secondary_sports ?? [],
-    onboardingCompleted: data.onboarding_completed ?? false,
+  return profileToUser(data as ProfileRow);
+
   };
 }
 
