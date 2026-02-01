@@ -28,41 +28,6 @@ export type MessageRequest = {
   createdAt: Date;
 };
 
-/**
- * Recommended Supabase tables (run in SQL editor):
- *
- * create table public.conversations (
- *   id uuid primary key default gen_random_uuid(),
- *   created_at timestamptz not null default now()
- * );
- *
- * create table public.conversation_members (
- *   conversation_id uuid references public.conversations(id) on delete cascade,
- *   user_id uuid references auth.users(id) on delete cascade,
- *   created_at timestamptz not null default now(),
- *   primary key (conversation_id, user_id)
- * );
- *
- * create table public.messages (
- *   id uuid primary key default gen_random_uuid(),
- *   conversation_id uuid references public.conversations(id) on delete cascade,
- *   sender_id uuid references auth.users(id) on delete cascade,
- *   body text not null,
- *   created_at timestamptz not null default now()
- * );
- *
- * create table public.message_requests (
- *   id uuid primary key default gen_random_uuid(),
- *   from_user_id uuid references auth.users(id) on delete cascade,
- *   to_user_id uuid references auth.users(id) on delete cascade,
- *   status text not null default 'pending',
- *   initial_message text not null default '',
- *   created_at timestamptz not null default now()
- * );
- *
- * RLS policies are required (see the instructions in my chat reply).
- */
-
 async function requireMe() {
   const { data, error } = await supabase.auth.getUser();
   if (error) throw error;
@@ -71,10 +36,91 @@ async function requireMe() {
 }
 
 function newConversationId(): string {
-  // Works in modern browsers. Fallback included just in case.
   const c: any = globalThis.crypto as any;
   if (c?.randomUUID) return c.randomUUID();
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function cleanUsername(u: any, email?: any) {
+  const s = typeof u === 'string' ? u.trim() : '';
+  if (s) return s;
+  const em = typeof email === 'string' ? email.trim() : '';
+  if (em && em.includes('@')) return em.split('@')[0];
+  return 'player';
+}
+
+function cleanPhoto(url: any) {
+  const s = typeof url === 'string' ? url.trim() : '';
+  if (s) return s;
+  return 'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup';
+}
+
+/**
+ * Fetch public profile info for a set of user IDs.
+ * This is designed to work even when:
+ * - profiles select succeeds but returns null fields
+ * - RLS blocks reading other users
+ * It will try direct select first, then call RPC for any missing users or missing fields.
+ */
+async function fetchPublicProfiles(ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.filter((x) => typeof x === 'string' && x.length > 0)));
+  const byId: Record<string, { username: string; profile_photo_url: string; bio?: string }> = {};
+  if (!uniqueIds.length) return byId;
+
+  // 1) Try direct select first
+  const { data: profs, error: pErr } = await supabase
+    .from('profiles')
+    .select('id,username,profile_photo_url,bio,email')
+    .in('id', uniqueIds);
+
+  if (!pErr && Array.isArray(profs)) {
+    for (const p of profs as any[]) {
+      byId[p.id] = {
+        username: cleanUsername(p.username, p.email),
+        profile_photo_url: cleanPhoto(p.profile_photo_url),
+        bio: typeof p.bio === 'string' ? p.bio : '',
+      };
+    }
+  }
+
+  // 2) If anything is missing or still looks like fallback, call RPC for the missing ones
+  const missingIds = uniqueIds.filter((id) => {
+    const v = byId[id];
+    if (!v) return true;
+    // If direct select returned "player" or default avatar, it likely did not have real values
+    // Try RPC to get real public values if available
+    const looksDefaultName = v.username === 'player';
+    const looksDefaultPhoto = v.profile_photo_url.includes('dicebear.com/7.x/avataaars');
+    return looksDefaultName || looksDefaultPhoto;
+  });
+
+  if (missingIds.length > 0) {
+    const { data: rpcRows, error: rpcErr } = await (supabase as any).rpc('get_public_profiles', {
+      p_user_ids: missingIds,
+    });
+
+    if (!rpcErr && Array.isArray(rpcRows)) {
+      for (const p of rpcRows as any[]) {
+        byId[p.id] = {
+          username: cleanUsername(p.username),
+          profile_photo_url: cleanPhoto(p.profile_photo_url),
+          bio: typeof p.bio === 'string' ? p.bio : '',
+        };
+      }
+    } else {
+      // Not fatal, we will keep whatever we had and fall back to defaults
+      if (rpcErr) console.warn('[Messages] get_public_profiles failed:', rpcErr);
+    }
+  }
+
+  // 3) Ensure every requested id has a value
+  for (const id of uniqueIds) {
+    if (!byId[id]) {
+      byId[id] = { username: 'player', profile_photo_url: cleanPhoto(''), bio: '' };
+    }
+  }
+
+  return byId;
 }
 
 export async function fetchMyMessageRequests(): Promise<MessageRequest[]> {
@@ -90,26 +136,8 @@ export async function fetchMyMessageRequests(): Promise<MessageRequest[]> {
 
   const rows = (data ?? []) as any[];
 
-  // Enrich from profiles
-  const fromIds = Array.from(new Set(rows.map((r) => r.from_user_id)));
-  // Try a normal profiles select first.
-  // If profiles RLS blocks selecting other users, fall back to an RPC (recommended SQL included).
-  let byId: Record<string, any> = {};
-  if (fromIds.length > 0) {
-    const { data: profs, error: pErr } = await supabase
-      .from('profiles')
-      .select('id,username,profile_photo_url')
-      .in('id', fromIds);
-
-    if (!pErr) {
-      (profs ?? []).forEach((p: any) => (byId[p.id] = p));
-    } else {
-      // RPC expected to return an array of { id, username, profile_photo_url }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: pubMany } = (await (supabase as any).rpc('get_public_profiles', { p_user_ids: fromIds })) as any;
-      ((pubMany ?? []) as any[]).forEach((p: any) => (byId[p.id] = p));
-    }
-  }
+  const fromIds = Array.from(new Set(rows.map((r) => r.from_user_id).filter(Boolean)));
+  const byId = await fetchPublicProfiles(fromIds);
 
   return rows.map((r) => ({
     id: r.id,
@@ -119,9 +147,7 @@ export async function fetchMyMessageRequests(): Promise<MessageRequest[]> {
     initialMessage: r.initial_message ?? '',
     createdAt: new Date(r.created_at),
     fromUsername: byId[r.from_user_id]?.username ?? 'player',
-    fromPhotoUrl:
-      byId[r.from_user_id]?.profile_photo_url ??
-      'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup',
+    fromPhotoUrl: byId[r.from_user_id]?.profile_photo_url ?? cleanPhoto(''),
   }));
 }
 
@@ -137,7 +163,6 @@ export async function sendMessageRequest(toUserId: string, initialMessage: strin
 
   if (!error) return;
 
-  // A very common case is the user already has a pending request. Treat it as success.
   const msg = (error as any)?.message ?? '';
   const code = (error as any)?.code ?? '';
   if (
@@ -155,7 +180,6 @@ export async function sendMessageRequest(toUserId: string, initialMessage: strin
 export async function acceptMessageRequest(requestId: string): Promise<string> {
   const me = await requireMe();
 
-  // Load request
   const { data: req, error: rErr } = await supabase
     .from('message_requests')
     .select('id,from_user_id,to_user_id,initial_message,status')
@@ -167,31 +191,26 @@ export async function acceptMessageRequest(requestId: string): Promise<string> {
   if (req.to_user_id !== me.id) throw new Error('Not allowed.');
   if (req.status !== 'pending') throw new Error('Request is not pending.');
 
-  // Create conversation WITHOUT selecting it back (RLS select would fail until members exist)
   const conversationId = newConversationId();
 
   const { error: cErr } = await supabase.from('conversations').insert({ id: conversationId });
   if (cErr) throw cErr;
 
-  // Add me first
   const { error: m1Err } = await supabase.from('conversation_members').insert({
     conversation_id: conversationId,
     user_id: me.id,
   });
   if (m1Err) throw m1Err;
 
-  // Add the requester second
   const { error: m2Err } = await supabase.from('conversation_members').insert({
     conversation_id: conversationId,
     user_id: req.from_user_id,
   });
   if (m2Err) throw m2Err;
 
-  // Mark request accepted
   const { error: uErr } = await supabase.from('message_requests').update({ status: 'accepted' }).eq('id', requestId);
   if (uErr) throw uErr;
 
-  // Optional first message (from requester)
   const first = (req.initial_message ?? '').trim();
   if (first) {
     const { error: msgErr } = await supabase.from('messages').insert({
@@ -226,7 +245,6 @@ export async function rejectMessageRequest(requestId: string): Promise<void> {
 export async function fetchMyConversations(): Promise<Conversation[]> {
   const me = await requireMe();
 
-  // Find conversations where I'm a member
   const { data: mems, error: memErr } = await supabase
     .from('conversation_members')
     .select('conversation_id')
@@ -236,7 +254,6 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
   const conversationIds = Array.from(new Set((mems ?? []).map((r: any) => r.conversation_id)));
   if (!conversationIds.length) return [];
 
-  // For each conversation, find the other user
   const { data: members, error: allMemErr } = await supabase
     .from('conversation_members')
     .select('conversation_id,user_id')
@@ -252,24 +269,9 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
   const otherIds = Array.from(
     new Set(Object.values(otherByConv).filter((v): v is string => typeof v === 'string' && v.length > 0))
   );
-  // Fetch the other user's basic profile (username + photo).
-  // Prefer direct select; fall back to RPC if RLS blocks selecting other users.
-  let byId: Record<string, any> = {};
-  if (otherIds.length > 0) {
-    const { data: profs, error: pErr } = await supabase
-      .from('profiles')
-      .select('id,username,profile_photo_url')
-      .in('id', otherIds);
 
-    if (!pErr) {
-      (profs ?? []).forEach((p: any) => (byId[p.id] = p));
-    } else {
-      const { data: pubMany } = await (supabase as any).rpc('get_public_profiles', { p_user_ids: otherIds });
-      ((pubMany ?? []) as any[]).forEach((p: any) => (byId[p.id] = p));
-    }
-  }
+  const byId = await fetchPublicProfiles(otherIds);
 
-  // Last message per conversation (simple: fetch recent messages)
   const { data: msgs, error: msgErr } = await supabase
     .from('messages')
     .select('conversation_id,body,created_at')
@@ -285,7 +287,7 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
 
   return conversationIds.map((id) => {
     const otherId = otherByConv[id];
-    const p = byId[otherId] ?? {};
+    const p = (otherId && byId[otherId]) ? byId[otherId] : { username: 'player', profile_photo_url: cleanPhoto('') };
     const last = lastByConv[id];
 
     return {
@@ -293,8 +295,7 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
       createdAt: new Date(),
       otherUserId: otherId,
       otherUsername: p.username ?? 'player',
-      otherPhotoUrl:
-        p.profile_photo_url ?? 'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup',
+      otherPhotoUrl: p.profile_photo_url ?? cleanPhoto(''),
       lastMessage: last ? { body: last.body ?? '', createdAt: new Date(last.created_at) } : undefined,
     };
   });
@@ -336,20 +337,17 @@ export async function sendMessage(conversationId: string, body: string): Promise
 export async function createConversationWithUser(otherUserId: string): Promise<string> {
   const me = await requireMe();
 
-  // Create conversation WITHOUT selecting it back (RLS select would fail until members exist)
   const conversationId = newConversationId();
 
   const { error: cErr } = await supabase.from('conversations').insert({ id: conversationId });
   if (cErr) throw cErr;
 
-  // Add me first
   const { error: m1Err } = await supabase.from('conversation_members').insert({
     conversation_id: conversationId,
     user_id: me.id,
   });
   if (m1Err) throw m1Err;
 
-  // Add the other user second
   const { error: m2Err } = await supabase.from('conversation_members').insert({
     conversation_id: conversationId,
     user_id: otherUserId,
