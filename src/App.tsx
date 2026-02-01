@@ -15,6 +15,7 @@ import GameDetail from "./pages/GameDetail";
 import LiveGame from "./pages/LiveGame";
 import PostGame from "./pages/PostGame";
 import Profile from "./pages/Profile";
+import EditProfile from "./pages/EditProfile";
 import Leaderboards from "./pages/Leaderboards";
 import Tournaments from "./pages/Tournaments";
 import CreateTournament from "./pages/CreateTournament";
@@ -49,6 +50,7 @@ const App = () => (
               <Route path="/game/:id/postgame" element={<PostGame />} />
 
               <Route path="/profile" element={<Profile />} />
+              <Route path="/edit-profile" element={<EditProfile />} />
               <Route path="/profile/:id" element={<Profile />} />
               <Route path="/leaderboards" element={<Leaderboards />} />
               <Route path="/tournaments" element={<Tournaments />} />

@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { GoogleMap as GoogleMapComponent, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
 import { Game } from '@/types';
 import { SportIcon } from './SportIcon';
 import { Lock } from 'lucide-react';
 import { GOOGLE_MAPS_API_KEY, hasGoogleMapsKey } from '@/lib/env';
-import { getBrowserLocation, LatLng } from '@/lib/geo';
 
 interface GoogleMapProps {
   games: Game[];
@@ -54,7 +53,7 @@ const sportColors: Record<string, string> = {
   'ultimate-frisbee': '#06b6d4',
 };
 
-export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleMapProps) {
+export function GoogleMap({ games, selectedGame, onGameSelect, center = defaultCenter }: GoogleMapProps) {
   // If the key is missing, do not attempt to load Maps (prevents runtime/deploy errors).
   if (!hasGoogleMapsKey) {
     return (
@@ -71,31 +70,6 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleM
   });
 
   const [map, setMap] = useState<google.maps.Map | null>(null);
-
-  const [resolvedCenter, setResolvedCenter] = useState<LatLng>(center ?? defaultCenter);
-  const hasCenterProp = useMemo(() => !!center, [center]);
-
-  useEffect(() => {
-    if (center) setResolvedCenter(center);
-  }, [center?.lat, center?.lng]);
-
-  useEffect(() => {
-    // If the parent did not provide a center, try to start at the user's location.
-    if (hasCenterProp) return;
-
-    let cancelled = false;
-    void getBrowserLocation()
-      .then((loc) => {
-        if (cancelled) return;
-        setResolvedCenter(loc);
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [hasCenterProp]);
-
 
   const onLoad = useCallback((map: google.maps.Map) => {
     setMap(map);
@@ -124,7 +98,7 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleM
   return (
     <GoogleMapComponent
       mapContainerStyle={mapContainerStyle}
-      center={resolvedCenter}
+      center={center}
       zoom={13}
       onLoad={onLoad}
       onUnmount={onUnmount}
@@ -135,7 +109,6 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleM
         mapTypeControl: false,
         streetViewControl: false,
         fullscreenControl: false,
-        gestureHandling: 'greedy',
       }}
       onClick={() => onGameSelect(null)}
     >

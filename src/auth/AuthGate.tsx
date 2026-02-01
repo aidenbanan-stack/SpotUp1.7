@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/lib/supabaseClient";
 import { useApp } from "@/context/AppContext";
 import { getOrCreateMyProfile } from "@/lib/profileApi";
@@ -8,24 +9,31 @@ import SignIn from "./SignIn";
  * AuthGate
  * - If a user is signed in (Supabase session exists), render the app.
  * - Otherwise, render the SignIn screen.
- *
- * This ensures the site prompts sign-in on first load and persists sessions automatically.
+ * - If signed in but onboarding is incomplete, force /onboarding first.
  */
 export default function AuthGate({ children }: { children: React.ReactNode }) {
-  const [loading, setLoading] = useState(true);
+  const location = useLocation();
+
+  const [loadingSession, setLoadingSession] = useState(true);
   const [hasSession, setHasSession] = useState(false);
-  const { setUser } = useApp();
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  const { user, setUser } = useApp();
 
   useEffect(() => {
     let mounted = true;
 
     const loadProfile = async () => {
       try {
+        setProfileLoading(true);
         const profile = await getOrCreateMyProfile();
         if (mounted) setUser(profile);
       } catch (e) {
         // eslint-disable-next-line no-console
         console.warn("[Supabase] profile load failed:", e);
+        if (mounted) setUser(null);
+      } finally {
+        if (mounted) setProfileLoading(false);
       }
     };
 
@@ -41,16 +49,13 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
         const sessionExists = Boolean(data.session);
         setHasSession(sessionExists);
-
-        // Key change: do NOT block the UI on profile load
-        setLoading(false);
+        setLoadingSession(false);
 
         if (!sessionExists) {
           setUser(null);
           return;
         }
 
-        // Load profile in background
         void loadProfile();
       })
       .catch((err) => {
@@ -58,7 +63,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         console.warn("[Supabase] getSession threw:", err);
         setUser(null);
         setHasSession(false);
-        setLoading(false);
+        setLoadingSession(false);
       });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -72,7 +77,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Profile load should not block UI
       void loadProfile();
     });
 
@@ -82,7 +86,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     };
   }, [setUser]);
 
-  if (loading) {
+  if (loadingSession || (hasSession && (profileLoading || !user))) {
     return (
       <div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">
         Loading...
@@ -91,6 +95,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   if (!hasSession) return <SignIn />;
+
+  // Force onboarding (but allow staying on onboarding route)
+  if (user && user.onboardingCompleted === false && location.pathname !== "/onboarding") {
+    return <Navigate to="/onboarding" replace />;
+  }
 
   return <>{children}</>;
 }

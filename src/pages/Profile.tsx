@@ -68,7 +68,7 @@ export default function Profile() {
               alt={user.username}
               className="w-24 h-24 rounded-full object-cover border-4 border-background shadow-glow"
             />
-            <button className="absolute bottom-0 right-0 p-2 bg-primary rounded-full shadow-lg">
+            <button onClick={() => navigate('/edit-profile')} className="absolute bottom-0 right-0 p-2 bg-primary rounded-full shadow-lg" aria-label="Edit profile photo">
               <Edit2 className="w-4 h-4 text-primary-foreground" />
             </button>
           </div>

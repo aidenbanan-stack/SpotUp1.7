@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { acceptFriendRequest, rejectFriendRequest } from '@/lib/socialApi';
 import { fetchProfileById } from '@/lib/profileApi';
 import { toast } from 'sonner';
-import { deleteNotification, markNotificationRead } from '@/lib/notificationsApi';
+import { clearMyNotifications, clearMyReadNotifications, deleteNotification, markNotificationRead } from '@/lib/notificationsApi';
 
 export default function Notifications() {
   const navigate = useNavigate();
@@ -57,6 +57,28 @@ export default function Notifications() {
     void markNotificationRead(id).catch(() => undefined);
 };
 
+
+  const handleClearRead = async () => {
+    try {
+      await clearMyReadNotifications();
+      setNotifications((prev) => prev.filter((n) => !n.read));
+      toast.success('Cleared read notifications.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to clear notifications.';
+      toast.error(msg);
+    }
+  };
+
+  const handleClearAll = async () => {
+    try {
+      await clearMyNotifications();
+      setNotifications([]);
+      toast.success('Cleared all notifications.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to clear notifications.';
+      toast.error(msg);
+    }
+  };
 
   const markAllAsRead = () => {
     setNotifications(notifications.map(n => ({ ...n, read: true })));
@@ -117,9 +139,17 @@ export default function Notifications() {
             Back
           </Button>
           <h1 className="text-lg font-bold">Notifications</h1>
-          <Button variant="ghost" onClick={markAllAsRead} className="text-sm">
-            Mark all read
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" onClick={handleClearRead} className="text-sm">
+              Clear read
+            </Button>
+            <Button variant="ghost" onClick={markAllAsRead} className="text-sm">
+              Mark all read
+            </Button>
+            <Button variant="ghost" onClick={handleClearAll} className="text-sm text-destructive">
+              Clear all
+            </Button>
+          </div>
         </div>
       </header>
 

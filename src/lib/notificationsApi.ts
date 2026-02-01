@@ -65,3 +65,40 @@ export async function deleteNotification(notificationId: string): Promise<void> 
 
   if (error) throw error;
 }
+
+
+/**
+ * Delete ALL of the current user's notifications.
+ * (RLS should restrict this to auth.uid().)
+ */
+export async function clearMyNotifications(): Promise<void> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr) throw authErr;
+  const me = auth.user;
+  if (!me) throw new Error('Not signed in.');
+
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('user_id', me.id);
+
+  if (error) throw error;
+}
+
+/**
+ * Delete only READ notifications.
+ */
+export async function clearMyReadNotifications(): Promise<void> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr) throw authErr;
+  const me = auth.user;
+  if (!me) throw new Error('Not signed in.');
+
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('user_id', me.id)
+    .eq('read', true);
+
+  if (error) throw error;
+}

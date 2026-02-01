@@ -52,6 +52,8 @@ export interface ReliabilityStats {
 }
 
 export interface User {
+  bio?: string;
+  onboardingCompleted?: boolean;
   id: string;
   username: string;
   email: string;

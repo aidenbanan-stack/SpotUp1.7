@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -15,7 +15,6 @@ import { Bell, MapPin, Plus, User, History, MessageCircle, Users2 } from 'lucide
 import { SPORTS, Sport } from '@/types';
 
 import spotupLogo from '@/assets/SpotUpLogoOld.png';
-import { getBrowserLocation, milesBetween, LatLng } from '@/lib/geo';
 
 type SportFilter = Sport | 'all';
 
@@ -26,21 +25,6 @@ export default function Home() {
   const [xpOpen, setXpOpen] = useState(false);
   const [selectedSport, setSelectedSport] = useState<SportFilter>('all');
 
-  const [radiusMiles, setRadiusMiles] = useState<number>(25);
-  const [myLoc, setMyLoc] = useState<LatLng | null>(null);
-
-
-  useEffect(() => {
-    let mounted = true;
-    void getBrowserLocation()
-      .then((loc) => {
-        if (mounted) setMyLoc(loc);
-      })
-      .catch(() => undefined);
-    return () => {
-      mounted = false;
-    };
-  }, []);
   const filteredGames = selectedSport === 'all'
     ? games
     : games.filter(g => g.sport === selectedSport);
@@ -48,14 +32,6 @@ export default function Home() {
   const upcomingGames = filteredGames
     .filter(g => g.status === 'scheduled')
     .sort((a, b) => +new Date(a.dateTime) - +new Date(b.dateTime));
-
-  const upcomingGamesInRange = useMemo(() => {
-    if (!myLoc) return upcomingGames;
-    return upcomingGames.filter((g) => {
-      const d = milesBetween(myLoc, { lat: g.location.latitude, lng: g.location.longitude });
-      return d <= radiusMiles;
-    });
-  }, [myLoc, upcomingGames, radiusMiles]);
 
   const liveGames = filteredGames
     .filter(g => g.status === 'live')
@@ -195,40 +171,23 @@ export default function Home() {
                 <h2 className="text-lg font-bold">Live Now</h2>
                 <div className="grid gap-3">
                   {liveGames.map((g) => (
-                    <GameCard key={g.id} game={g} onClick={() => navigate(`/game/${g.id}`)} />
+                    <GameCard key={g.id} game={g} />
                   ))}
                 </div>
               </section>
             )}
 
             <section className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-bold">Upcoming</h2>
-                <div className="w-44">
-                  <Select value={String(radiusMiles)} onValueChange={(v) => setRadiusMiles(Number(v))}>
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Range" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="5">Within 5 mi</SelectItem>
-                      <SelectItem value="10">Within 10 mi</SelectItem>
-                      <SelectItem value="25">Within 25 mi</SelectItem>
-                      <SelectItem value="50">Within 50 mi</SelectItem>
-                      <SelectItem value="100">Within 100 mi</SelectItem>
-                      <SelectItem value="9999">Any distance</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              {upcomingGamesInRange.length === 0 ? (
+              <h2 className="text-lg font-bold">Upcoming</h2>
+              {upcomingGames.length === 0 ? (
                 <div className="glass-card p-6 text-center">
                   <p className="font-semibold">No games yet</p>
                   <p className="text-sm text-muted-foreground mt-1">Tap Host to create one.</p>
                 </div>
               ) : (
                 <div className="grid gap-3">
-                  {upcomingGamesInRange.map((g) => (
-                    <GameCard key={g.id} game={g} onClick={() => navigate(`/game/${g.id}`)} />
+                  {upcomingGames.map((g) => (
+                    <GameCard key={g.id} game={g} />
                   ))}
                 </div>
               )}

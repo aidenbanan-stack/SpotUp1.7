@@ -1,11 +1,21 @@
 import { supabase } from '@/lib/supabaseClient';
-import type { User } from '@/types';
+import type { Sport, User } from '@/types';
 
 type ProfileRow = {
   id: string;
   email: string | null;
   username: string | null;
   profile_photo_url: string | null;
+
+  // Extended profile fields (recommended)
+  bio: string | null;
+  age: number | null;
+  height: string | null;
+  city: string | null;
+  primary_sport: Sport | null;
+  secondary_sports: Sport[] | null;
+  onboarding_completed: boolean | null;
+
   created_at?: string;
 };
 
@@ -18,20 +28,23 @@ function emailToUsername(email: string): string {
 function profileToUser(row: ProfileRow): User {
   const email = row.email ?? '';
   const username = row.username ?? (email ? emailToUsername(email) : 'player');
-  const photo = row.profile_photo_url ?? 'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup';
+  const photo =
+    row.profile_photo_url ?? 'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup';
 
-  // The app UI expects a richer User shape. For now we provide sensible defaults.
   return {
     id: row.id,
     username,
     email,
-    age: 20,
-    height: "5'9\"",
-    city: 'Irvine, CA',
-    primarySport: 'basketball',
-    secondarySports: [],
+    bio: row.bio ?? '',
+    age: row.age ?? 20,
+    height: row.height ?? "5'9\"",
+    city: row.city ?? 'Irvine, CA',
+    primarySport: row.primary_sport ?? 'basketball',
+    secondarySports: row.secondary_sports ?? [],
     skillLevel: 'intermediate',
     profilePhotoUrl: photo,
+    onboardingCompleted: Boolean(row.onboarding_completed),
+
     stats: { gamesPlayed: 0, gamesHosted: 0, reliability: 100 },
     xp: 0,
     level: 'rookie',
@@ -43,8 +56,21 @@ function profileToUser(row: ProfileRow): User {
 }
 
 /**
- * Fetch the signed-in user's profile row, creating it if needed.
- * Requires a table: public.profiles(id uuid pk references auth.users(id), email, username, profile_photo_url)
+ * Required table (Supabase SQL):
+ * public.profiles(
+ *   id uuid primary key references auth.users(id),
+ *   email text,
+ *   username text,
+ *   profile_photo_url text,
+ *   bio text,
+ *   age int,
+ *   height text,
+ *   city text,
+ *   primary_sport text,
+ *   secondary_sports text[],
+ *   onboarding_completed boolean default false,
+ *   created_at timestamptz default now()
+ * )
  */
 export async function getOrCreateMyProfile(): Promise<User> {
   const { data: auth, error: authErr } = await supabase.auth.getUser();
@@ -59,24 +85,29 @@ export async function getOrCreateMyProfile(): Promise<User> {
 
   const { data: existing, error: selErr } = await supabase
     .from('profiles')
-    .select('id,email,username,profile_photo_url')
+    .select(
+      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed'
+    )
     .eq('id', me.id)
     .maybeSingle();
 
   if (selErr) throw selErr;
   if (existing) return profileToUser(existing as ProfileRow);
 
-  const insert: ProfileRow = {
+  const insert: Partial<ProfileRow> = {
     id: me.id,
     email,
     username: usernameFromMeta ?? (email ? emailToUsername(email) : 'player'),
     profile_photo_url: photoFromMeta,
+    onboarding_completed: false,
   };
 
   const { data: created, error: insErr } = await supabase
     .from('profiles')
     .insert(insert)
-    .select('id,email,username,profile_photo_url')
+    .select(
+      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed'
+    )
     .single();
 
   if (insErr) throw insErr;
@@ -90,7 +121,9 @@ export async function getOrCreateMyProfile(): Promise<User> {
 export async function fetchProfileById(id: string): Promise<User | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id,email,username,profile_photo_url')
+    .select(
+      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed'
+    )
     .eq('id', id)
     .maybeSingle();
 
@@ -106,25 +139,94 @@ export async function fetchProfilesByIds(ids: string[]): Promise<User[]> {
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('id,email,username,profile_photo_url')
+    .select(
+      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed'
+    )
     .in('id', ids);
 
   if (error) throw error;
   return (data ?? []).map((row) => profileToUser(row as ProfileRow));
 }
 
-
-export async function searchProfiles(search: string, limit = 20): Promise<User[]> {
-  const q = (search || '').trim();
+/**
+ * Search profiles by username/email (used for Discover + message requests).
+ */
+export async function searchProfiles(query: string, limit = 20): Promise<User[]> {
+  const q = query.trim();
   if (!q) return [];
-
-  const like = `%${q}%`;
   const { data, error } = await supabase
     .from('profiles')
-    .select('id,email,username,profile_photo_url')
-    .or(`username.ilike.${like},email.ilike.${like}`)
+    .select(
+      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed'
+    )
+    .or(`username.ilike.%${q}%,email.ilike.%${q}%`)
     .limit(limit);
 
   if (error) throw error;
-  return (data ?? []).map(profileToUser);
+  return (data ?? []).map((row) => profileToUser(row as ProfileRow));
+}
+
+export type UpdateMyProfileInput = {
+  username?: string;
+  profilePhotoUrl?: string;
+  bio?: string;
+  age?: number;
+  height?: string;
+  city?: string;
+  primarySport?: Sport;
+  secondarySports?: Sport[];
+  onboardingCompleted?: boolean;
+};
+
+export async function updateMyProfile(input: UpdateMyProfileInput): Promise<User> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr) throw authErr;
+  const me = auth.user;
+  if (!me) throw new Error('Not signed in.');
+
+  const patch: any = {};
+  if (input.username !== undefined) patch.username = input.username;
+  if (input.profilePhotoUrl !== undefined) patch.profile_photo_url = input.profilePhotoUrl;
+  if (input.bio !== undefined) patch.bio = input.bio;
+  if (input.age !== undefined) patch.age = input.age;
+  if (input.height !== undefined) patch.height = input.height;
+  if (input.city !== undefined) patch.city = input.city;
+  if (input.primarySport !== undefined) patch.primary_sport = input.primarySport;
+  if (input.secondarySports !== undefined) patch.secondary_sports = input.secondarySports;
+  if (input.onboardingCompleted !== undefined) patch.onboarding_completed = input.onboardingCompleted;
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .update(patch)
+    .eq('id', me.id)
+    .select(
+      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed'
+    )
+    .single();
+
+  if (error) throw error;
+  return profileToUser(data as ProfileRow);
+}
+
+/**
+ * Optional: upload an avatar file to Supabase Storage bucket "avatars" and return public URL.
+ * You must create the bucket in Supabase: Storage -> Buckets -> New bucket (name: avatars) and set it public.
+ */
+export async function uploadMyAvatar(file: File): Promise<string> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr) throw authErr;
+  const me = auth.user;
+  if (!me) throw new Error('Not signed in.');
+
+  const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+  const path = `${me.id}/${Date.now()}.${ext}`;
+
+  const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, {
+    upsert: true,
+    contentType: file.type || undefined,
+  });
+  if (upErr) throw upErr;
+
+  const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+  return data.publicUrl;
 }
