@@ -178,34 +178,71 @@ export type UpdateMyProfileInput = {
   onboardingCompleted?: boolean;
 };
 
-export async function updateMyProfile(input: UpdateMyProfileInput): Promise<User> {
-  const { data: auth, error: authErr } = await supabase.auth.getUser();
-  if (authErr) throw authErr;
-  const me = auth.user;
-  if (!me) throw new Error('Not signed in.');
+import { supabase } from '@/lib/supabase';
+import type { Sport } from '@/types';
 
-  const patch: any = {};
-  if (input.username !== undefined) patch.username = input.username;
-  if (input.profilePhotoUrl !== undefined) patch.profile_photo_url = input.profilePhotoUrl;
-  if (input.bio !== undefined) patch.bio = input.bio;
-  if (input.age !== undefined) patch.age = input.age;
-  if (input.height !== undefined) patch.height = input.height;
-  if (input.city !== undefined) patch.city = input.city;
-  if (input.primarySport !== undefined) patch.primary_sport = input.primarySport;
-  if (input.secondarySports !== undefined) patch.secondary_sports = input.secondarySports;
-  if (input.onboardingCompleted !== undefined) patch.onboarding_completed = input.onboardingCompleted;
+type UpdateMyProfileInput = {
+  username?: string;
+  bio?: string;
+  age?: number;
+  height?: string;
+  city?: string;
+  primarySport?: Sport;
+  secondarySports?: Sport[];
+  profilePhotoUrl?: string;
+  onboardingCompleted?: boolean;
+};
+
+export async function updateMyProfile(input: UpdateMyProfileInput) {
+  const { data: authData, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !authData?.user) throw new Error('Not signed in');
+
+  const userId = authData.user.id;
+  const email = authData.user.email ?? null;
+
+  // Map your app fields to DB columns exactly
+  const payload: any = {
+    id: userId, // REQUIRED for your RLS policies
+    email,
+  };
+
+  if (typeof input.username === 'string') payload.username = input.username;
+  if (typeof input.bio === 'string') payload.bio = input.bio;
+  if (typeof input.age === 'number') payload.age = input.age;
+  if (typeof input.height === 'string') payload.height = input.height || null;
+  if (typeof input.city === 'string') payload.city = input.city;
+
+  if (input.primarySport) payload.primary_sport = input.primarySport;
+  if (Array.isArray(input.secondarySports)) payload.secondary_sports = input.secondarySports;
+
+  if (typeof input.profilePhotoUrl === 'string') payload.profile_photo_url = input.profilePhotoUrl;
+
+  if (typeof input.onboardingCompleted === 'boolean') {
+    payload.onboarding_completed = input.onboardingCompleted;
+  }
 
   const { data, error } = await supabase
     .from('profiles')
-    .update(patch)
-    .eq('id', me.id)
-    .select(
-      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed'
-    )
+    .upsert(payload, { onConflict: 'id' })
+    .select('*')
     .single();
 
-  if (error) throw error;
-  return profileToUser(data as ProfileRow);
+  if (error) throw new Error(error.message);
+
+  // Return in app-friendly shape (match your existing user shape)
+  return {
+    id: data.id,
+    email: data.email,
+    username: data.username,
+    profilePhotoUrl: data.profile_photo_url,
+    city: data.city,
+    bio: data.bio,
+    age: data.age,
+    height: data.height,
+    primarySport: data.primary_sport,
+    secondarySports: data.secondary_sports ?? [],
+    onboardingCompleted: data.onboarding_completed ?? false,
+  };
 }
 
 /**
