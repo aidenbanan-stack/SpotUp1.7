@@ -16,7 +16,7 @@ import { SPORTS, Sport } from '@/types';
 
 
 import { getBrowserLocation, milesBetween, type LatLng } from '@/lib/geo';
-import spotupLogo from '@/assets/SpotUpLogoOld.png';
+import spotupLogo from '@/assets/SpotUpLogo.jpg';
 
 type SportFilter = Sport | 'all';
 
