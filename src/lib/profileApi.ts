@@ -85,7 +85,7 @@ function publicProfileToUser(row: PublicProfileRow): User {
     email: '',
     bio: row.bio ?? '',
     age: 20,
-    height: "5'9"",
+    height: "5'9",
     city: '',
     primarySport: 'basketball',
     secondarySports: [],
