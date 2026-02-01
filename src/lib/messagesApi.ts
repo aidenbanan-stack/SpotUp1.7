@@ -67,53 +67,52 @@ async function fetchPublicProfiles(ids: string[]) {
   const byId: Record<string, { username: string; profile_photo_url: string; bio?: string }> = {};
   if (!uniqueIds.length) return byId;
 
-  // 1) Try direct select first
-  const { data: profs, error: pErr } = await supabase
+  const upsertRow = (keyId: string, row: any) => {
+    byId[keyId] = {
+      username: cleanUsername(row?.username, row?.email),
+      profile_photo_url: cleanPhoto(row?.profile_photo_url),
+      bio: typeof row?.bio === 'string' ? row.bio : '',
+    };
+  };
+
+  // 1) Try direct select by id (common schema: profiles.id = auth.users.id)
+  const { data: profs1, error: err1 } = await supabase
     .from('profiles')
     .select('id,username,profile_photo_url,bio,email')
     .in('id', uniqueIds);
 
-  if (!pErr && Array.isArray(profs)) {
-    for (const p of profs as any[]) {
-      byId[p.id] = {
-        username: cleanUsername(p.username, p.email),
-        profile_photo_url: cleanPhoto(p.profile_photo_url),
-        bio: typeof p.bio === 'string' ? p.bio : '',
-      };
+  if (!err1 && Array.isArray(profs1)) {
+    for (const p of profs1 as any[]) upsertRow(p.id, p);
+  }
+
+  // 2) If some IDs not found, try alternate schema: profiles.user_id = auth.users.id
+  const notFoundAfterIdSelect = uniqueIds.filter((id) => !byId[id]);
+  if (notFoundAfterIdSelect.length > 0) {
+    const { data: profs2, error: err2 } = await supabase
+      .from('profiles')
+      .select('user_id,username,profile_photo_url,bio,email')
+      .in('user_id', notFoundAfterIdSelect);
+
+    if (!err2 && Array.isArray(profs2)) {
+      for (const p of profs2 as any[]) upsertRow(p.user_id, p);
     }
   }
 
-  // 2) If anything is missing or still looks like fallback, call RPC for the missing ones
-  const missingIds = uniqueIds.filter((id) => {
-    const v = byId[id];
-    if (!v) return true;
-    // If direct select returned "player" or default avatar, it likely did not have real values
-    // Try RPC to get real public values if available
-    const looksDefaultName = v.username === 'player';
-    const looksDefaultPhoto = v.profile_photo_url.includes('dicebear.com/7.x/avataaars');
-    return looksDefaultName || looksDefaultPhoto;
-  });
-
-  if (missingIds.length > 0) {
+  // 3) For anything still missing, call RPC (works even when RLS blocks or schema differs)
+  const stillMissing = uniqueIds.filter((id) => !byId[id]);
+  if (stillMissing.length > 0) {
     const { data: rpcRows, error: rpcErr } = await (supabase as any).rpc('get_public_profiles', {
-      p_user_ids: missingIds,
+      p_user_ids: stillMissing,
     });
 
     if (!rpcErr && Array.isArray(rpcRows)) {
-      for (const p of rpcRows as any[]) {
-        byId[p.id] = {
-          username: cleanUsername(p.username),
-          profile_photo_url: cleanPhoto(p.profile_photo_url),
-          bio: typeof p.bio === 'string' ? p.bio : '',
-        };
-      }
+      for (const p of rpcRows as any[]) upsertRow(p.id, p);
     } else {
-      // Not fatal, we will keep whatever we had and fall back to defaults
       if (rpcErr) console.warn('[Messages] get_public_profiles failed:', rpcErr);
     }
   }
 
-  // 3) Ensure every requested id has a value
+  // 4) Final defaults so UI never breaks
   for (const id of uniqueIds) {
     if (!byId[id]) {
       byId[id] = { username: 'player', profile_photo_url: cleanPhoto(''), bio: '' };
