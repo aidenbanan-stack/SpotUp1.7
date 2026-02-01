@@ -318,12 +318,19 @@ export async function createConversationWithUser(otherUserId: string): Promise<s
 
   const conversationId = conv.id as string;
 
-  // Add both members
-  const { error: mErr } = await supabase.from('conversation_members').insert([
-    { conversation_id: conversationId, user_id: me.id },
-    { conversation_id: conversationId, user_id: otherUserId },
-  ]);
-  if (mErr) throw mErr;
+// Add me first
+const { error: m1Err } = await supabase.from('conversation_members').insert({
+  conversation_id: conversationId,
+  user_id: me.id,
+});
+if (m1Err) throw m1Err;
+
+// Add the other user second
+const { error: m2Err } = await supabase.from('conversation_members').insert({
+  conversation_id: conversationId,
+  user_id: otherUserId,
+});
+if (m2Err) throw m2Err;
 
   return conversationId;
 }
