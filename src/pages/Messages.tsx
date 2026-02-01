@@ -4,6 +4,7 @@ import { ArrowLeft, MessageCircle, Search, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useApp } from '@/context/AppContext';
@@ -140,7 +141,8 @@ export default function Messages() {
       toast.success('Message request sent.');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to send request.';
-      toast.error(msg);
+      // Some deployments insert successfully but still return a client-side error.
+      toast.error(`${msg} If they still receive it, you're good.`);
     }
   };
 
@@ -201,7 +203,10 @@ export default function Messages() {
             </button>
 
             <div className="flex items-center gap-3">
-              <img src={activeConv.otherPhotoUrl} className="w-8 h-8 rounded-full object-cover" />
+            <Avatar className="w-8 h-8">
+              <AvatarImage src={activeConv.otherPhotoUrl} />
+              <AvatarFallback>{(activeConv.otherUsername ?? 'P').slice(0, 1).toUpperCase()}</AvatarFallback>
+            </Avatar>
               <h1 className="text-lg font-bold">{activeConv.otherUsername}</h1>
             </div>
 
@@ -277,7 +282,10 @@ export default function Messages() {
               {results.map((u) => (
                 <div key={u.id} className="flex items-center justify-between p-2 rounded-xl bg-secondary/40">
                   <div className="flex items-center gap-3">
-                    <img src={u.profilePhotoUrl} className="w-9 h-9 rounded-full object-cover" />
+                    <Avatar className="w-9 h-9">
+                      <AvatarImage src={u.profilePhotoUrl} />
+                      <AvatarFallback>{(u.username ?? 'P').slice(0, 1).toUpperCase()}</AvatarFallback>
+                    </Avatar>
                     <div>
                       <p className="font-semibold leading-tight">{u.username}</p>
                       <p className="text-xs text-muted-foreground">
@@ -314,7 +322,10 @@ export default function Messages() {
                   onClick={() => void openConversation(c)}
                   className="w-full text-left p-3 rounded-2xl bg-secondary/40 hover:bg-secondary/60 transition flex items-center gap-3"
                 >
-                  <img src={c.otherPhotoUrl} className="w-10 h-10 rounded-full object-cover" />
+                  <Avatar className="w-10 h-10">
+                    <AvatarImage src={c.otherPhotoUrl} />
+                    <AvatarFallback>{(c.otherUsername ?? 'P').slice(0, 1).toUpperCase()}</AvatarFallback>
+                  </Avatar>
                   <div className="flex-1">
                     <p className="font-semibold">{c.otherUsername}</p>
                     <p className="text-xs text-muted-foreground line-clamp-1">
@@ -332,7 +343,10 @@ export default function Messages() {
             ) : (
               requests.map((r) => (
                 <div key={r.id} className="p-3 rounded-2xl bg-secondary/40 flex items-center gap-3">
-                  <img src={r.fromPhotoUrl} className="w-10 h-10 rounded-full object-cover" />
+                  <Avatar className="w-10 h-10">
+                    <AvatarImage src={r.fromPhotoUrl} />
+                    <AvatarFallback>{(r.fromUsername ?? 'P').slice(0, 1).toUpperCase()}</AvatarFallback>
+                  </Avatar>
                   <div className="flex-1">
                     <p className="font-semibold">{r.fromUsername}</p>
                     <p className="text-xs text-muted-foreground line-clamp-2">{r.initialMessage || 'Wants to message you.'}</p>

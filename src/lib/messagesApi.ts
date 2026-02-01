@@ -92,14 +92,24 @@ export async function fetchMyMessageRequests(): Promise<MessageRequest[]> {
 
   // Enrich from profiles
   const fromIds = Array.from(new Set(rows.map((r) => r.from_user_id)));
-  const { data: profs, error: pErr } = await supabase
-    .from('profiles')
-    .select('id,username,profile_photo_url')
-    .in('id', fromIds);
+  // Try a normal profiles select first.
+  // If profiles RLS blocks selecting other users, fall back to an RPC (recommended SQL included).
+  let byId: Record<string, any> = {};
+  if (fromIds.length > 0) {
+    const { data: profs, error: pErr } = await supabase
+      .from('profiles')
+      .select('id,username,profile_photo_url')
+      .in('id', fromIds);
 
-  if (pErr) throw pErr;
-  const byId: Record<string, any> = {};
-  (profs ?? []).forEach((p: any) => (byId[p.id] = p));
+    if (!pErr) {
+      (profs ?? []).forEach((p: any) => (byId[p.id] = p));
+    } else {
+      // RPC expected to return an array of { id, username, profile_photo_url }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: pubMany } = (await (supabase as any).rpc('get_public_profiles', { p_user_ids: fromIds })) as any;
+      ((pubMany ?? []) as any[]).forEach((p: any) => (byId[p.id] = p));
+    }
+  }
 
   return rows.map((r) => ({
     id: r.id,
@@ -125,7 +135,21 @@ export async function sendMessageRequest(toUserId: string, initialMessage: strin
     initial_message: initialMessage ?? '',
   });
 
-  if (error) throw error;
+  if (!error) return;
+
+  // A very common case is the user already has a pending request. Treat it as success.
+  const msg = (error as any)?.message ?? '';
+  const code = (error as any)?.code ?? '';
+  if (
+    String(code) === '23505' ||
+    msg.toLowerCase().includes('duplicate') ||
+    msg.toLowerCase().includes('unique') ||
+    msg.toLowerCase().includes('already exists')
+  ) {
+    return;
+  }
+
+  throw error;
 }
 
 export async function acceptMessageRequest(requestId: string): Promise<string> {
@@ -225,15 +249,25 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
     if (r.user_id !== me.id) otherByConv[r.conversation_id] = r.user_id;
   });
 
-  const otherIds = Array.from(new Set(Object.values(otherByConv)));
-  const { data: profs, error: pErr } = await supabase
-    .from('profiles')
-    .select('id,username,profile_photo_url')
-    .in('id', otherIds);
+  const otherIds = Array.from(
+    new Set(Object.values(otherByConv).filter((v): v is string => typeof v === 'string' && v.length > 0))
+  );
+  // Fetch the other user's basic profile (username + photo).
+  // Prefer direct select; fall back to RPC if RLS blocks selecting other users.
+  let byId: Record<string, any> = {};
+  if (otherIds.length > 0) {
+    const { data: profs, error: pErr } = await supabase
+      .from('profiles')
+      .select('id,username,profile_photo_url')
+      .in('id', otherIds);
 
-  if (pErr) throw pErr;
-  const byId: Record<string, any> = {};
-  (profs ?? []).forEach((p: any) => (byId[p.id] = p));
+    if (!pErr) {
+      (profs ?? []).forEach((p: any) => (byId[p.id] = p));
+    } else {
+      const { data: pubMany } = await (supabase as any).rpc('get_public_profiles', { p_user_ids: otherIds });
+      ((pubMany ?? []) as any[]).forEach((p: any) => (byId[p.id] = p));
+    }
+  }
 
   // Last message per conversation (simple: fetch recent messages)
   const { data: msgs, error: msgErr } = await supabase

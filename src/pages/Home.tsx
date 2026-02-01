@@ -197,7 +197,7 @@ const filteredGames = selectedSport === 'all'
                 <h2 className="text-lg font-bold">Live Now</h2>
                 <div className="grid gap-3">
                   {liveGames.map((g) => (
-                    <GameCard key={g.id} game={g} />
+                    <GameCard key={g.id} game={g} viewerUserId={user?.id} />
                   ))}
                 </div>
               </section>
@@ -231,7 +231,7 @@ const filteredGames = selectedSport === 'all'
               ) : (
                 <div className="grid gap-3">
                   {upcomingGamesInRange.map((g) => (
-                    <GameCard key={g.id} game={g} onClick={() => navigate(`/game/${g.id}`)} />
+                    <GameCard key={g.id} game={g} viewerUserId={user?.id} onClick={() => navigate(`/game/${g.id}`)} />
                   ))}
                 </div>
               )}

@@ -133,7 +133,7 @@ export default function MapView() {
           </SheetHeader>
           {selectedGame && (
             <div className="py-2">
-              <GameCard game={selectedGame} />
+              <GameCard game={selectedGame} viewerUserId={user?.id} />
               <div className="flex gap-3 mt-4">
                 <Button 
                   variant="default" 

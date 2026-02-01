@@ -152,8 +152,9 @@ export default function EditProfile() {
               <p className="text-sm font-medium mb-2">Primary sport *</p>
               <SportGrid
                 selected={primarySport}
-                onChange={(sports) => setPrimarySport(sports.slice(0, 1))}
-                maxSelection={1}
+                // Single-select: tapping a new sport should switch immediately.
+                single
+                onChange={(sports) => setPrimarySport(sports)}
               />
             </div>
 

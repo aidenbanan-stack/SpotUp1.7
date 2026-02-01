@@ -178,7 +178,12 @@ export default function Notifications() {
                     'glass-card p-4 cursor-pointer transition-all hover:scale-[1.01]',
                     !notification.read && 'border-primary/30 bg-primary/5'
                   )}
-                  onClick={() => markAsReadLocal(notification.id)}
+                  onClick={() => {
+                    // Friend requests should keep their action buttons visible until accepted/rejected.
+                    if (notification.type !== 'friend_request') {
+                      markAsReadLocal(notification.id);
+                    }
+                  }}
                 >
                   <div className="flex items-start gap-4">
                     <div className="p-2 rounded-xl bg-background/50">{getNotificationIcon(notification.type)}</div>
@@ -194,7 +199,7 @@ export default function Notifications() {
                         </span>
                       </div>
 
-                      {notification.type === 'friend_request' && fromId && !notification.read && (
+                      {notification.type === 'friend_request' && fromId && (
                         <div className="mt-3 flex gap-2">
                           <Button
                             variant="hero"

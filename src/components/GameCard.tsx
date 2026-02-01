@@ -25,6 +25,16 @@ interface GameCardProps {
   onClick?: () => void;
   variant?: 'default' | 'compact';
   className?: string;
+  viewerUserId?: string;
+}
+
+function obfuscateAreaName(areaName: string): string {
+  // Best-effort: show "City, ST" (or last two comma-separated parts) without street/address.
+  const raw = (areaName || '').trim();
+  if (!raw) return 'Location';
+  const parts = raw.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length <= 2) return parts.join(', ');
+  return parts.slice(-2).join(', ');
 }
 
 export function GameCard({
@@ -32,9 +42,18 @@ export function GameCard({
   onClick,
   variant = 'default',
   className,
+  viewerUserId,
 }: GameCardProps) {
   const dt = safeFormatDateTime(game.dateTime);
   const isUpcoming = dt ? dt.date > new Date() : false;
+
+  const canSeeExactLocation =
+    !game.isPrivate ||
+    (!!viewerUserId && (game.hostId === viewerUserId || game.playerIds.includes(viewerUserId)));
+
+  const displayLocation = canSeeExactLocation
+    ? game.location.areaName
+    : obfuscateAreaName(game.location.areaName);
 
   // ---------- COMPACT CARD ----------
   if (variant === 'compact') {
@@ -131,7 +150,7 @@ export function GameCard({
 
         <div className="flex items-center gap-1.5 text-muted-foreground">
           <MapPin className="w-4 h-4 text-primary" />
-          <span>{game.location.areaName}</span>
+          <span>{displayLocation}</span>
         </div>
 
         <div className="flex items-center gap-1.5 text-muted-foreground">

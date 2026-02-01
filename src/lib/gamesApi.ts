@@ -185,6 +185,72 @@ export async function joinGame(gameId: string, _userId: string, _isPrivate: bool
   return await hydrateGame(rowToGame(data as GameRow));
 }
 
+/**
+ * Approve a pending join request (host only).
+ * Prefer RPC if installed; fall back to a direct update which should still be protected by RLS.
+ */
+export async function approveJoinRequest(gameId: string, userIdToApprove: string): Promise<Game> {
+  const { data: rpcData, error: rpcErr } = await supabase
+    .rpc('approve_game_request', { p_game_id: gameId, p_user_id: userIdToApprove })
+    .single();
+
+  if (!rpcErr && rpcData) {
+    return await hydrateGame(rowToGame(rpcData as GameRow));
+  }
+
+  // Fall back: fetch the game row, then update arrays.
+  const { data: existing, error: fetchError } = await supabase
+    .from('games')
+    .select('player_ids,pending_request_ids')
+    .eq('id', gameId)
+    .single();
+  if (fetchError) throw fetchError;
+
+  const currentPlayers = Array.from(new Set((existing?.player_ids ?? []) as string[]));
+  const currentPending = ((existing?.pending_request_ids ?? []) as string[]).filter((id) => id !== userIdToApprove);
+  const nextPlayers = Array.from(new Set([...currentPlayers, userIdToApprove]));
+
+  const { data, error } = await supabase
+    .from('games')
+    .update({ player_ids: nextPlayers, pending_request_ids: currentPending })
+    .eq('id', gameId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return await hydrateGame(rowToGame(data as GameRow));
+}
+
+/**
+ * Reject a pending join request (host only).
+ */
+export async function rejectJoinRequest(gameId: string, userIdToReject: string): Promise<Game> {
+  const { data: rpcData, error: rpcErr } = await supabase
+    .rpc('reject_game_request', { p_game_id: gameId, p_user_id: userIdToReject })
+    .single();
+
+  if (!rpcErr && rpcData) {
+    return await hydrateGame(rowToGame(rpcData as GameRow));
+  }
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('games')
+    .select('pending_request_ids')
+    .eq('id', gameId)
+    .single();
+  if (fetchError) throw fetchError;
+
+  const currentPending = ((existing?.pending_request_ids ?? []) as string[]).filter((id) => id !== userIdToReject);
+
+  const { data, error } = await supabase
+    .from('games')
+    .update({ pending_request_ids: currentPending })
+    .eq('id', gameId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return await hydrateGame(rowToGame(data as GameRow));
+}
+
 export async function leaveGame(gameId: string, _userId: string): Promise<Game> {
   const { data, error } = await supabase.rpc('leave_game', { p_game_id: gameId }).single();
   if (error) throw error;
@@ -237,6 +303,16 @@ export async function endGame(gameId: string): Promise<Game> {
 
   if (error) throw error;
   return await hydrateGame(rowToGame(data as GameRow));
+}
+
+/**
+ * Host-only: report a signed-up player who did not show up.
+ * This updates the reported user's reliability stats in `profiles`.
+ * Requires SQL function `report_no_show` (see `supabase_sql_updates.sql`).
+ */
+export async function reportNoShow(gameId: string, reportedUserId: string): Promise<void> {
+  const { error } = await supabase.rpc('report_no_show', { p_game_id: gameId, p_user_id: reportedUserId });
+  if (error) throw error;
 }
 
 type PostGameVoteCategory =
@@ -301,6 +377,8 @@ export async function submitPostGameVotes(
     nextVoters[voterId][v.category] = v.votedUserId;
   }
 
+  // Prefer direct update (works if RLS allows participants). If it fails, fall back to an RPC
+  // (installable via supabase_sql_updates.sql).
   const { data, error } = await supabase
     .from('games')
     .update({ post_game_votes: nextVotes, post_game_voters: nextVoters })
@@ -308,8 +386,16 @@ export async function submitPostGameVotes(
     .select('*')
     .single();
 
-  if (error) throw error;
+  if (!error && data) {
+    // @ts-ignore
+    return await hydrateGame(rowToGame(data as GameRow));
+  }
 
+  const { data: rpcData, error: rpcErr } = await supabase
+    .rpc('submit_post_game_votes', { p_game_id: gameId, p_votes: nextVotes, p_voters: nextVoters })
+    .single();
+
+  if (rpcErr) throw error ?? rpcErr;
   // @ts-ignore
-  return await hydrateGame(rowToGame(data as GameRow));
+  return await hydrateGame(rowToGame(rpcData as GameRow));
 }

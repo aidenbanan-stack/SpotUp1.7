@@ -5,8 +5,9 @@ import { Button } from '@/components/ui/button';
 import { ArrowLeft, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { PostGameVoting } from '@/components/PostGameVoting';
-import { submitPostGameVotes } from '@/lib/gamesApi';
-import { fetchProfilesByIds } from '@/lib/profileApi';
+import { reportNoShow, submitPostGameVotes } from '@/lib/gamesApi';
+import { fetchProfilesByIds, getOrCreateMyProfile } from '@/lib/profileApi';
+import { awardXp } from '@/lib/xpApi';
 import type { User } from '@/types';
 
 const CATEGORY_KEYS = [
@@ -20,8 +21,9 @@ const CATEGORY_KEYS = [
 export default function PostGame() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { games, setGames, user } = useApp();
+  const { games, setGames, user, setUser } = useApp();
   const [busy, setBusy] = useState(false);
+  const [noShowBusyId, setNoShowBusyId] = useState<string | null>(null);
 
   const game = games.find((g) => g.id === id);
 
@@ -73,11 +75,45 @@ export default function PostGame() {
       const updated = await submitPostGameVotes(game.id, user.id, votes as any);
       setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
       toast.success('Votes submitted.');
+
+      // XP: casting postgame votes
+      try {
+        await awardXp('postgame_vote', game.id);
+        const refreshed = await getOrCreateMyProfile();
+        setUser(refreshed);
+      } catch {
+        // Non-blocking
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to submit votes.';
       toast.error(msg);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const isHost = !!user && !!game && game.hostId === user.id;
+
+  const noShowCandidates = useMemo(() => {
+    if (!game) return [] as User[];
+    const checked = new Set(game.checkedInIds ?? []);
+    const signedUp = new Set(game.playerIds ?? []);
+    const missingIds = Array.from(signedUp).filter((pid) => !checked.has(pid));
+    const byId = new Map(players.map((p) => [p.id, p] as const));
+    return missingIds.map((pid) => byId.get(pid)).filter(Boolean) as User[];
+  }, [game, players]);
+
+  const handleReportNoShow = async (reportedUserId: string) => {
+    if (!game || !isHost) return;
+    try {
+      setNoShowBusyId(reportedUserId);
+      await reportNoShow(game.id, reportedUserId);
+      toast.success('No-show reported. Reliability updated.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to report no-show.';
+      toast.error(msg);
+    } finally {
+      setNoShowBusyId(null);
     }
   };
 
@@ -148,6 +184,33 @@ export default function PostGame() {
             currentUserId={user.id}
             onVoteComplete={handleVoteComplete}
           />
+        )}
+
+        {isHost && noShowCandidates.length > 0 && (
+          <section className="glass-card p-4">
+            <h2 className="font-semibold">Report no-shows</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Players who signed up but did not check in. Reporting updates their reliability.
+            </p>
+            <div className="mt-3 space-y-2">
+              {noShowCandidates.map((p) => (
+                <div key={p.id} className="flex items-center justify-between gap-3 bg-secondary/40 rounded-xl p-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold truncate">{p.username}</p>
+                    <p className="text-xs text-muted-foreground truncate">{p.city}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={noShowBusyId === p.id}
+                    onClick={() => void handleReportNoShow(p.id)}
+                  >
+                    Report
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </section>
         )}
 
         <Button variant="secondary" className="w-full" disabled={busy} onClick={() => navigate(`/game/${game.id}`)}>

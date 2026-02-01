@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -6,18 +6,50 @@ import { SportIcon, SportBadge } from '@/components/SportIcon';
 import { ArrowLeft, Calendar, Clock, Lock, MapPin, Share2, Users } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { deleteGame, joinGame, leaveGame, setGameStatus } from '@/lib/gamesApi';
+import { approveJoinRequest, deleteGame, joinGame, leaveGame, rejectJoinRequest, setGameStatus } from '@/lib/gamesApi';
+import { fetchProfilesByIds, getOrCreateMyProfile } from '@/lib/profileApi';
+import { awardXp } from '@/lib/xpApi';
 import PlayerProfileDialog from '@/components/PlayerProfileDialog';
 
 export default function GameDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { games, setGames, user } = useApp();
+  const { games, setGames, user, setUser } = useApp();
 
   const [profileOpen, setProfileOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
+  const [pendingProfiles, setPendingProfiles] = useState<any[]>([]);
+  const [pendingBusy, setPendingBusy] = useState<string | null>(null);
+
   const game = games.find((g) => g.id === id);
+
+  // Load pending join request profiles (host-only UI).
+  useEffect(() => {
+    let mounted = true;
+    const loadPending = async () => {
+      if (!game) return;
+      if (!user || game.hostId !== user.id) {
+        if (mounted) setPendingProfiles([]);
+        return;
+      }
+      const ids = game.pendingRequestIds ?? [];
+      if (ids.length === 0) {
+        if (mounted) setPendingProfiles([]);
+        return;
+      }
+      try {
+        const profs = await fetchProfilesByIds(ids);
+        if (mounted) setPendingProfiles(profs);
+      } catch {
+        if (mounted) setPendingProfiles([]);
+      }
+    };
+    void loadPending();
+    return () => {
+      mounted = false;
+    };
+  }, [game?.id, game?.pendingRequestIds?.join(','), user?.id]);
 
   if (!game) {
     return (
@@ -45,6 +77,60 @@ export default function GameDetail() {
     setProfileOpen(true);
   };
 
+  useEffect(() => {
+    let mounted = true;
+
+    const loadPending = async () => {
+      if (!game || !isHost) {
+        setPendingProfiles([]);
+        return;
+      }
+      const ids = Array.from(new Set(game.pendingRequestIds ?? [])).filter(Boolean);
+      if (ids.length === 0) {
+        setPendingProfiles([]);
+        return;
+      }
+      setPendingLoading(true);
+      try {
+        const profs = await fetchProfilesByIds(ids);
+        if (!mounted) return;
+        setPendingProfiles(profs);
+      } catch {
+        if (!mounted) return;
+        setPendingProfiles([]);
+      } finally {
+        if (mounted) setPendingLoading(false);
+      }
+    };
+
+    void loadPending();
+    return () => {
+      mounted = false;
+    };
+  }, [game.id, isHost, (game.pendingRequestIds ?? []).join(',')]);
+
+  const handleApproveRequest = async (targetUserId: string) => {
+    try {
+      const updated = await approveJoinRequest(game.id, targetUserId);
+      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
+      toast.success('Request approved. Player added to the game.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to approve request.';
+      toast.error(message);
+    }
+  };
+
+  const handleRejectRequest = async (targetUserId: string) => {
+    try {
+      const updated = await rejectJoinRequest(game.id, targetUserId);
+      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
+      toast.success('Request declined.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to decline request.';
+      toast.error(message);
+    }
+  };
+
   const handleJoin = async () => {
     if (!user) {
       toast.error('Please sign in to join games.');
@@ -56,6 +142,15 @@ export default function GameDetail() {
       const updated = await joinGame(game.id, user.id, game.isPrivate);
       setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
       toast.success(game.isPrivate ? 'Join request sent! Waiting for host approval.' : 'You have joined the game!');
+
+      // XP: joining (or requesting) a game
+      try {
+        await awardXp('join_game', game.id);
+        const refreshed = await getOrCreateMyProfile();
+        setUser(refreshed);
+      } catch {
+        // Non-blocking
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to join game.';
       toast.error(message);
@@ -113,6 +208,36 @@ export default function GameDetail() {
   const handleShare = () => {
     navigator.clipboard.writeText(window.location.href);
     toast.success('Link copied to clipboard!');
+  };
+
+  const handleApprovePending = async (pendingUserId: string) => {
+    if (!user || !isHost) return;
+    try {
+      setPendingBusy(pendingUserId);
+      const updated = await approveJoinRequest(game.id, pendingUserId);
+      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
+      toast.success('Request approved. Player added.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to approve request.';
+      toast.error(message);
+    } finally {
+      setPendingBusy(null);
+    }
+  };
+
+  const handleRejectPending = async (pendingUserId: string) => {
+    if (!user || !isHost) return;
+    try {
+      setPendingBusy(pendingUserId);
+      const updated = await rejectJoinRequest(game.id, pendingUserId);
+      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
+      toast.success('Request removed.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to reject request.';
+      toast.error(message);
+    } finally {
+      setPendingBusy(null);
+    }
   };
 
   return (
@@ -225,6 +350,53 @@ export default function GameDetail() {
             <p className="font-semibold">{game.location.areaName}</p>
           )}
         </section>
+
+        {isHost && (game.pendingRequestIds?.length ?? 0) > 0 && (
+          <section className="animate-fade-in" style={{ animationDelay: '180ms' }}>
+            <h3 className="text-sm font-semibold text-muted-foreground mb-3">
+              JOIN REQUESTS ({game.pendingRequestIds.length})
+            </h3>
+            <div className="space-y-2">
+              {pendingProfiles.map((p) => (
+                <div key={p.id} className="glass-card p-3 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => openProfile(p.id)}
+                    className="flex items-center gap-3 flex-1 text-left"
+                  >
+                    <img
+                      src={p.profilePhotoUrl}
+                      alt={p.username}
+                      className="w-10 h-10 rounded-full object-cover"
+                    />
+                    <div className="min-w-0">
+                      <p className="font-semibold truncate">{p.username}</p>
+                      <p className="text-xs text-muted-foreground truncate">{p.city}</p>
+                    </div>
+                  </button>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="hero"
+                      disabled={pendingBusy === p.id}
+                      onClick={() => handleApprovePending(p.id)}
+                    >
+                      Accept
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={pendingBusy === p.id}
+                      onClick={() => handleRejectPending(p.id)}
+                    >
+                      Deny
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {game.description && (
           <section className="animate-fade-in" style={{ animationDelay: '200ms' }}>

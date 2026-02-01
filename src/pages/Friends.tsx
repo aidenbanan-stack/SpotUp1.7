@@ -4,7 +4,14 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { useApp } from '@/context/AppContext';
 import { ArrowLeft } from 'lucide-react';
-import { fetchMyFriendIds, fetchMyFriends, sendFriendRequest } from '@/lib/socialApi';
+import {
+  acceptFriendRequest,
+  fetchMyFriendIds,
+  fetchMyFriends,
+  fetchMyIncomingFriendRequests,
+  rejectFriendRequest,
+  sendFriendRequest,
+} from '@/lib/socialApi';
 import type { User } from '@/types';
 import { searchProfiles } from '@/lib/profileApi';
 import { Button } from '@/components/ui/button';
@@ -30,6 +37,7 @@ export default function Friends() {
 
   const [friends, setFriends] = useState<User[]>([]);
   const [friendIds, setFriendIds] = useState<string[]>([]);
+  const [incomingReqs, setIncomingReqs] = useState<User[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [query, setQuery] = useState<string>('');
 
@@ -59,14 +67,16 @@ export default function Friends() {
 
       setLoading(true);
       try {
-        const [ids, f] = await Promise.all([fetchMyFriendIds(), fetchMyFriends()]);
+        const [ids, f, incoming] = await Promise.all([fetchMyFriendIds(), fetchMyFriends(), fetchMyIncomingFriendRequests()]);
         if (!mounted) return;
         setFriendIds(ids);
         setFriends(f);
+        setIncomingReqs(incoming);
       } catch {
         if (!mounted) return;
         setFriendIds([]);
         setFriends([]);
+        setIncomingReqs([]);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -171,6 +181,73 @@ export default function Friends() {
 
         {tab === 'friends' ? (
           <>
+            {incomingReqs.length > 0 && (
+              <div className="glass-card p-4">
+                <p className="font-semibold">Friend requests</p>
+                <div className="mt-3 space-y-2">
+                  {incomingReqs.map((r) => (
+                    <div key={r.id} className="flex items-center justify-between gap-3 bg-secondary/40 rounded-xl p-3">
+                      <button onClick={() => openProfile(r.id)} className="flex items-center gap-3 min-w-0 text-left">
+                        <Avatar className="w-9 h-9">
+                          <AvatarImage src={r.profilePhotoUrl} alt={r.username} />
+                          <AvatarFallback>{initials(r.username)}</AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <p className="font-semibold truncate">{r.username}</p>
+                          <p className="text-xs text-muted-foreground truncate">{r.email}</p>
+                        </div>
+                      </button>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            try {
+                              await acceptFriendRequest(r.id);
+                              toast.success('Friend request accepted.');
+                              const [ids, f, incoming] = await Promise.all([
+                                fetchMyFriendIds(),
+                                fetchMyFriends(),
+                                fetchMyIncomingFriendRequests(),
+                              ]);
+                              setFriendIds(ids);
+                              setFriends(f);
+                              setIncomingReqs(incoming);
+                            } catch (err) {
+                              const msg = err instanceof Error ? err.message : 'Failed to accept request.';
+                              toast.error(msg);
+                            }
+                          }}
+                        >
+                          Accept
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            try {
+                              await rejectFriendRequest(r.id);
+                              toast.success('Request declined.');
+                              const incoming = await fetchMyIncomingFriendRequests();
+                              setIncomingReqs(incoming);
+                            } catch (err) {
+                              const msg = err instanceof Error ? err.message : 'Failed to decline request.';
+                              toast.error(msg);
+                            }
+                          }}
+                        >
+                          Decline
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="glass-card p-4">
               <Input
                 placeholder="Search friends"

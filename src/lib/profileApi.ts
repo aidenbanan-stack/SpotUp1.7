@@ -1,6 +1,13 @@
 import { supabase } from '@/lib/supabaseClient';
 import type { Sport, User } from '@/types';
 
+type PublicProfileRow = {
+  id: string;
+  username: string | null;
+  profile_photo_url: string | null;
+  bio?: string | null;
+};
+
 type ProfileRow = {
   id: string;
   email: string | null;
@@ -15,6 +22,13 @@ type ProfileRow = {
   primary_sport: Sport | null;
   secondary_sports: Sport[] | null;
   onboarding_completed: boolean | null;
+
+  // Optional progression fields (added by SQL updates)
+  xp?: number | null;
+  show_ups?: number | null;
+  cancellations?: number | null;
+  no_shows?: number | null;
+  reliability_score?: number | null;
 
   created_at?: string;
 };
@@ -45,6 +59,39 @@ function profileToUser(row: ProfileRow): User {
     profilePhotoUrl: photo,
     onboardingCompleted: Boolean(row.onboarding_completed),
 
+    stats: { gamesPlayed: 0, gamesHosted: 0, reliability: row.reliability_score ?? 100 },
+    xp: row.xp ?? 0,
+    level: 'rookie',
+    badges: [],
+    reliabilityStats: {
+      showUps: row.show_ups ?? 0,
+      cancellations: row.cancellations ?? 0,
+      noShows: row.no_shows ?? 0,
+      score: row.reliability_score ?? 100,
+    },
+    votesReceived: { bestScorer: 0, bestDefender: 0, bestTeammate: 0 },
+    uniqueCourtsPlayed: 0,
+  };
+}
+
+function publicProfileToUser(row: PublicProfileRow): User {
+  const username = row.username ?? 'player';
+  const photo =
+    row.profile_photo_url ?? 'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup';
+
+  return {
+    id: row.id,
+    username,
+    email: '',
+    bio: row.bio ?? '',
+    age: 20,
+    height: "5'9"",
+    city: '',
+    primarySport: 'basketball',
+    secondarySports: [],
+    skillLevel: 'intermediate',
+    profilePhotoUrl: photo,
+    onboardingCompleted: true,
     stats: { gamesPlayed: 0, gamesHosted: 0, reliability: 100 },
     xp: 0,
     level: 'rookie',
@@ -54,6 +101,7 @@ function profileToUser(row: ProfileRow): User {
     uniqueCourtsPlayed: 0,
   };
 }
+
 
 /**
  * Required table (Supabase SQL):
@@ -86,7 +134,7 @@ export async function getOrCreateMyProfile(): Promise<User> {
   const { data: existing, error: selErr } = await supabase
     .from('profiles')
     .select(
-      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed'
+      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed,xp,show_ups,cancellations,no_shows,reliability_score'
     )
     .eq('id', me.id)
     .maybeSingle();
@@ -106,7 +154,7 @@ export async function getOrCreateMyProfile(): Promise<User> {
     .from('profiles')
     .insert(insert)
     .select(
-      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed'
+      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed,xp,show_ups,cancellations,no_shows,reliability_score'
     )
     .single();
 
@@ -119,16 +167,24 @@ export async function getOrCreateMyProfile(): Promise<User> {
  * Returns null if the profile does not exist.
  */
 export async function fetchProfileById(id: string): Promise<User | null> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select(
-      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed'
-    )
-    .eq('id', id)
-    .maybeSingle();
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(
+        'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed,xp,show_ups,cancellations,no_shows,reliability_score'
+      )
+      .eq('id', id)
+      .maybeSingle();
 
-  if (error) throw error;
-  return data ? profileToUser(data as ProfileRow) : null;
+    if (error) throw error;
+    return data ? profileToUser(data as ProfileRow) : null;
+  } catch (err: any) {
+    // RLS can block reading other users' profiles. Fall back to a safe public RPC.
+    const { data, error } = await supabase.rpc('get_public_profiles', { p_user_ids: [id] });
+    if (error) throw err;
+    const row = (data?.[0] ?? null) as any;
+    return row ? publicProfileToUser(row as PublicProfileRow) : null;
+  }
 }
 
 /**
@@ -137,15 +193,21 @@ export async function fetchProfileById(id: string): Promise<User | null> {
 export async function fetchProfilesByIds(ids: string[]): Promise<User[]> {
   if (!ids.length) return [];
 
-  const { data, error } = await supabase
-    .from('profiles')
-    .select(
-      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed'
-    )
-    .in('id', ids);
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(
+        'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed,xp,show_ups,cancellations,no_shows,reliability_score'
+      )
+      .in('id', ids);
 
-  if (error) throw error;
-  return (data ?? []).map((row) => profileToUser(row as ProfileRow));
+    if (error) throw error;
+    return (data ?? []).map((row) => profileToUser(row as ProfileRow));
+  } catch (err) {
+    const { data, error } = await supabase.rpc('get_public_profiles', { p_user_ids: ids });
+    if (error) throw err;
+    return (data ?? []).map((row: any) => publicProfileToUser(row as PublicProfileRow));
+  }
 }
 
 /**
@@ -157,7 +219,7 @@ export async function searchProfiles(query: string, limit = 20): Promise<User[]>
   const { data, error } = await supabase
     .from('profiles')
     .select(
-      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed'
+      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed,xp,show_ups,cancellations,no_shows,reliability_score'
     )
     .or(`username.ilike.%${q}%,email.ilike.%${q}%`)
     .limit(limit);

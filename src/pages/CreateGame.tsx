@@ -13,10 +13,12 @@ import { ArrowLeft, Calendar, Clock, MapPin, Users } from 'lucide-react';
 import { Sport, SkillLevel, SKILL_LEVELS, Game } from '@/types';
 import { toast } from 'sonner';
 import { createGame } from '@/lib/gamesApi';
+import { awardXp } from '@/lib/xpApi';
+import { getOrCreateMyProfile } from '@/lib/profileApi';
 
 export default function CreateGame() {
   const navigate = useNavigate();
-  const { user, games, setGames } = useApp();
+  const { user, games, setGames, setUser } = useApp();
 
   const [sport, setSport] = useState<Sport[]>(user?.primarySport ? [user.primarySport] : []);
   const [title, setTitle] = useState('');
@@ -97,6 +99,16 @@ export default function CreateGame() {
       });
 
       setGames([saved, ...prevGames.filter((g) => g.id !== optimisticGame.id)]);
+
+      // XP: hosting a game
+      try {
+        await awardXp('host_game', saved.id);
+        const refreshed = await getOrCreateMyProfile();
+        setUser(refreshed);
+      } catch {
+        // Non-blocking
+      }
+
       toast.success('Game created successfully!');
       navigate(`/game/${saved.id}`);
     } catch (err: any) {

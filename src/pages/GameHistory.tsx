@@ -75,7 +75,7 @@ export default function GameHistory() {
         {filteredMyGames.length > 0 ? (
           <div className="space-y-3">
             {filteredMyGames.map(game => (
-              <GameCard key={game.id} game={game} variant="compact" onClick={() => navigate(`/game/${game.id}`)} />
+              <GameCard key={game.id} game={game} viewerUserId={user?.id} variant="compact" onClick={() => navigate(`/game/${game.id}`)} />
             ))}
           </div>
         ) : (

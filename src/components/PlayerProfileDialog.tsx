@@ -143,6 +143,16 @@ export default function PlayerProfileDialog({ open, onOpenChange, userId }: Prop
               <StatPill label="Courts" value={profile.uniqueCourtsPlayed ?? 0} />
             </div>
 
+
+            <div className="glass-card p-4 space-y-2">
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">About</div>
+              {profile.bio ? (
+                <div className="text-sm text-foreground whitespace-pre-line">{profile.bio}</div>
+              ) : (
+                <div className="text-sm text-muted-foreground">No bio yet.</div>
+              )}
+            </div>
+
             <div className="glass-card p-4 space-y-2">
               <div className="text-xs uppercase tracking-wide text-muted-foreground">Post-game votes</div>
               <div className="grid grid-cols-3 gap-2">

@@ -3,17 +3,70 @@ import { fetchProfilesByIds } from '@/lib/profileApi';
 import type { User } from '@/types';
 
 export async function sendFriendRequest(toUserId: string): Promise<void> {
-  const { error } = await supabase.rpc('send_friend_request', { p_to_user: toUserId });
-  if (error) throw error;
+  // Prefer RPC (uses auth.uid() on the server). Fall back to direct insert for projects
+  // that haven't installed the SQL functions yet.
+  const { error: rpcErr } = await supabase.rpc('send_friend_request', { p_to_user: toUserId });
+  if (!rpcErr) return;
+
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr) throw authErr;
+  const me = auth.user;
+  if (!me) throw new Error('Not signed in.');
+
+  // Idempotent: if there's already a pending request between these users, treat as success.
+  const { error } = await supabase
+    .from('friend_requests')
+    .upsert(
+      {
+        user_id: me.id,
+        friend_id: toUserId,
+        status: 'pending',
+      },
+      { onConflict: 'user_id,friend_id' }
+    );
+
+  if (error) {
+    // If this fails due to unique constraints in the opposite direction, treat as success.
+    const msg = (error as any)?.message ?? '';
+    if (msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('unique')) return;
+    throw error;
+  }
 }
 
 export async function acceptFriendRequest(fromUserId: string): Promise<void> {
-  const { error } = await supabase.rpc('accept_friend_request', { p_from_user: fromUserId });
+  const { error: rpcErr } = await supabase.rpc('accept_friend_request', { p_from_user: fromUserId });
+  if (!rpcErr) return;
+
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr) throw authErr;
+  const me = auth.user;
+  if (!me) throw new Error('Not signed in.');
+
+  // Fall back: mark the request accepted in either direction.
+  const { error } = await supabase
+    .from('friend_requests')
+    .update({ status: 'accepted' })
+    .or(
+      `and(user_id.eq.${fromUserId},friend_id.eq.${me.id}),and(user_id.eq.${me.id},friend_id.eq.${fromUserId})`
+    );
   if (error) throw error;
 }
 
 export async function rejectFriendRequest(fromUserId: string): Promise<void> {
-  const { error } = await supabase.rpc('reject_friend_request', { p_from_user: fromUserId });
+  const { error: rpcErr } = await supabase.rpc('reject_friend_request', { p_from_user: fromUserId });
+  if (!rpcErr) return;
+
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr) throw authErr;
+  const me = auth.user;
+  if (!me) throw new Error('Not signed in.');
+
+  const { error } = await supabase
+    .from('friend_requests')
+    .update({ status: 'rejected' })
+    .or(
+      `and(user_id.eq.${fromUserId},friend_id.eq.${me.id}),and(user_id.eq.${me.id},friend_id.eq.${fromUserId})`
+    );
   if (error) throw error;
 }
 
@@ -24,6 +77,33 @@ type FriendRequestRow = {
   status: 'pending' | 'accepted' | 'rejected';
   created_at?: string;
 };
+
+export type IncomingFriendRequest = {
+  id: string;
+  fromUserId: string;
+  createdAt?: string;
+};
+
+/**
+ * Incoming pending friend requests for the signed-in user.
+ */
+export async function fetchMyIncomingFriendRequests(): Promise<IncomingFriendRequest[]> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr) throw authErr;
+  const me = auth.user;
+  if (!me) throw new Error('Not signed in.');
+
+  const { data, error } = await supabase
+    .from('friend_requests')
+    .select('id,user_id,friend_id,status,created_at')
+    .eq('status', 'pending')
+    .eq('friend_id', me.id)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  const rows = (data ?? []) as FriendRequestRow[];
+  return rows.map((r) => ({ id: r.id, fromUserId: r.user_id, createdAt: r.created_at }));
+}
 
 /**
  * Returns the user ids of all accepted friends for the signed-in user.

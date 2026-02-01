@@ -81,6 +81,20 @@ export default function Profile() {
           <div className="flex justify-center">
             <PlayerLevelBadge level={user.level} xp={user.xp} showProgress />
           </div>
+
+          {/* Bio */}
+          <div className="mt-4 text-sm text-muted-foreground">
+            {user.bio ? (
+              <p className="whitespace-pre-line">{user.bio}</p>
+            ) : (
+              <button
+                onClick={() => navigate('/edit-profile')}
+                className="underline underline-offset-4 hover:text-foreground transition-colors"
+              >
+                Add a bio to your profile
+              </button>
+            )}
+          </div>
         </section>
 
         {/* Stats Grid */}
