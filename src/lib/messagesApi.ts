@@ -293,8 +293,8 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
       id,
       createdAt: new Date(),
       otherUserId: otherId,
-      otherUsername: p.username ?? 'player',
-      otherPhotoUrl: p.profile_photo_url ?? cleanPhoto(''),
+      otherUsername: p.username || 'player',
+      otherPhotoUrl: p.profile_photo_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup',
       lastMessage: last ? { body: last.body ?? '', createdAt: new Date(last.created_at) } : undefined,
     };
   });
