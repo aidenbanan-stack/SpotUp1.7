@@ -248,6 +248,8 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
     .from('conversation_members')
     .select('conversation_id')
     .eq('user_id', me.id);
+  console.log('[DEBUG] conversation_members:', members);
+
 
   if (memErr) throw memErr;
   const conversationIds = Array.from(new Set((mems ?? []).map((r: any) => r.conversation_id)));
@@ -264,6 +266,8 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
   (members ?? []).forEach((r: any) => {
     if (r.user_id !== me.id) otherByConv[r.conversation_id] = r.user_id;
   });
+  console.log('[DEBUG] otherByConv:', otherByConv);
+
 
   const otherIds = Array.from(
     new Set(Object.values(otherByConv).filter((v): v is string => typeof v === 'string' && v.length > 0))
