@@ -70,6 +70,13 @@ async function requireMe() {
   return data.user;
 }
 
+function newConversationId(): string {
+  // Works in modern browsers. Fallback included just in case.
+  const c: any = globalThis.crypto as any;
+  if (c?.randomUUID) return c.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export async function fetchMyMessageRequests(): Promise<MessageRequest[]> {
   const me = await requireMe();
 
@@ -84,7 +91,7 @@ export async function fetchMyMessageRequests(): Promise<MessageRequest[]> {
   const rows = (data ?? []) as any[];
 
   // Enrich from profiles
-  const fromIds = Array.from(new Set(rows.map(r => r.from_user_id)));
+  const fromIds = Array.from(new Set(rows.map((r) => r.from_user_id)));
   const { data: profs, error: pErr } = await supabase
     .from('profiles')
     .select('id,username,profile_photo_url')
@@ -102,21 +109,21 @@ export async function fetchMyMessageRequests(): Promise<MessageRequest[]> {
     initialMessage: r.initial_message ?? '',
     createdAt: new Date(r.created_at),
     fromUsername: byId[r.from_user_id]?.username ?? 'player',
-    fromPhotoUrl: byId[r.from_user_id]?.profile_photo_url ?? 'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup',
+    fromPhotoUrl:
+      byId[r.from_user_id]?.profile_photo_url ??
+      'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup',
   }));
 }
 
 export async function sendMessageRequest(toUserId: string, initialMessage: string): Promise<void> {
   const me = await requireMe();
 
-  const { error } = await supabase
-    .from('message_requests')
-    .insert({
-      from_user_id: me.id,
-      to_user_id: toUserId,
-      status: 'pending',
-      initial_message: initialMessage ?? '',
-    });
+  const { error } = await supabase.from('message_requests').insert({
+    from_user_id: me.id,
+    to_user_id: toUserId,
+    status: 'pending',
+    initial_message: initialMessage ?? '',
+  });
 
   if (error) throw error;
 }
@@ -136,37 +143,28 @@ export async function acceptMessageRequest(requestId: string): Promise<string> {
   if (req.to_user_id !== me.id) throw new Error('Not allowed.');
   if (req.status !== 'pending') throw new Error('Request is not pending.');
 
-  // Create conversation
-  const { data: conv, error: cErr } = await supabase
-    .from('conversations')
-    .insert({})
-    .select('id')
-    .single();
+  // Create conversation WITHOUT selecting it back (RLS select would fail until members exist)
+  const conversationId = newConversationId();
 
+  const { error: cErr } = await supabase.from('conversations').insert({ id: conversationId });
   if (cErr) throw cErr;
 
-  const conversationId = conv.id as string;
+  // Add me first
+  const { error: m1Err } = await supabase.from('conversation_members').insert({
+    conversation_id: conversationId,
+    user_id: me.id,
+  });
+  if (m1Err) throw m1Err;
 
-// Add me first
-const { error: m1Err } = await supabase.from('conversation_members').insert({
-  conversation_id: conversationId,
-  user_id: me.id,
-});
-if (m1Err) throw m1Err;
-
-// Add the requester second
-const { error: m2Err } = await supabase.from('conversation_members').insert({
-  conversation_id: conversationId,
-  user_id: req.from_user_id,
-});
-if (m2Err) throw m2Err;
+  // Add the requester second
+  const { error: m2Err } = await supabase.from('conversation_members').insert({
+    conversation_id: conversationId,
+    user_id: req.from_user_id,
+  });
+  if (m2Err) throw m2Err;
 
   // Mark request accepted
-  const { error: uErr } = await supabase
-    .from('message_requests')
-    .update({ status: 'accepted' })
-    .eq('id', requestId);
-
+  const { error: uErr } = await supabase.from('message_requests').update({ status: 'accepted' }).eq('id', requestId);
   if (uErr) throw uErr;
 
   // Optional first message (from requester)
@@ -197,11 +195,7 @@ export async function rejectMessageRequest(requestId: string): Promise<void> {
   if (req.to_user_id !== me.id) throw new Error('Not allowed.');
   if (req.status !== 'pending') return;
 
-  const { error } = await supabase
-    .from('message_requests')
-    .update({ status: 'rejected' })
-    .eq('id', requestId);
-
+  const { error } = await supabase.from('message_requests').update({ status: 'rejected' }).eq('id', requestId);
   if (error) throw error;
 }
 
@@ -265,7 +259,8 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
       createdAt: new Date(),
       otherUserId: otherId,
       otherUsername: p.username ?? 'player',
-      otherPhotoUrl: p.profile_photo_url ?? 'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup',
+      otherPhotoUrl:
+        p.profile_photo_url ?? 'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup',
       lastMessage: last ? { body: last.body ?? '', createdAt: new Date(last.created_at) } : undefined,
     };
   });
@@ -307,30 +302,25 @@ export async function sendMessage(conversationId: string, body: string): Promise
 export async function createConversationWithUser(otherUserId: string): Promise<string> {
   const me = await requireMe();
 
-  // Create conversation
-  const { data: conv, error: cErr } = await supabase
-    .from('conversations')
-    .insert({})
-    .select('id')
-    .single();
+  // Create conversation WITHOUT selecting it back (RLS select would fail until members exist)
+  const conversationId = newConversationId();
 
+  const { error: cErr } = await supabase.from('conversations').insert({ id: conversationId });
   if (cErr) throw cErr;
 
-  const conversationId = conv.id as string;
+  // Add me first
+  const { error: m1Err } = await supabase.from('conversation_members').insert({
+    conversation_id: conversationId,
+    user_id: me.id,
+  });
+  if (m1Err) throw m1Err;
 
-// Add me first
-const { error: m1Err } = await supabase.from('conversation_members').insert({
-  conversation_id: conversationId,
-  user_id: me.id,
-});
-if (m1Err) throw m1Err;
-
-// Add the other user second
-const { error: m2Err } = await supabase.from('conversation_members').insert({
-  conversation_id: conversationId,
-  user_id: otherUserId,
-});
-if (m2Err) throw m2Err;
+  // Add the other user second
+  const { error: m2Err } = await supabase.from('conversation_members').insert({
+    conversation_id: conversationId,
+    user_id: otherUserId,
+  });
+  if (m2Err) throw m2Err;
 
   return conversationId;
 }
