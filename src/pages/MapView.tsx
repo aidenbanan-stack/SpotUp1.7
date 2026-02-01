@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { SportSelector } from '@/components/SportSelector';
@@ -10,14 +10,28 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { ArrowLeft, Filter, Navigation, X, Key } from 'lucide-react';
 import { Game, SkillLevel, SKILL_LEVELS } from '@/types';
 import { hasGoogleMapsKey } from '@/lib/env';
+import { getBrowserLocation, LatLng } from '@/lib/geo';
 
 export default function MapView() {
   const navigate = useNavigate();
   const { selectedSport, setSelectedSport, games } = useApp();
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
+  const [center, setCenter] = useState<LatLng | undefined>(undefined);
   const [showFilters, setShowFilters] = useState(false);
   const [skillFilter, setSkillFilter] = useState<SkillLevel | 'all'>('all');
   const [privacyFilter, setPrivacyFilter] = useState<'all' | 'public' | 'private'>('all');
+
+  useEffect(() => {
+    let mounted = true;
+    void getBrowserLocation()
+      .then((loc) => {
+        if (mounted) setCenter(loc);
+      })
+      .catch(() => undefined);
+    return () => {
+      mounted = false;
+    };
+  }, []);
   const filteredGames = useMemo(() => {
     return games.filter(game => {
       if (selectedSport !== 'all' && game.sport !== selectedSport) return false;
@@ -86,10 +100,17 @@ export default function MapView() {
               games={filteredGames}
               selectedGame={selectedGame}
               onGameSelect={setSelectedGame}
+              center={center}
             />
             
             {/* Locate me button */}
-            <button className="absolute bottom-32 right-4 p-3 bg-card rounded-xl shadow-card border border-border/50 z-30">
+            <button
+              onClick={() => {
+                void getBrowserLocation().then(setCenter).catch(() => undefined);
+              }}
+              className="absolute bottom-32 right-4 p-3 bg-card rounded-xl shadow-card border border-border/50 z-30"
+              aria-label="Locate me"
+            >
               <Navigation className="w-5 h-5 text-primary" />
             </button>
 

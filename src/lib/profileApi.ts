@@ -215,8 +215,6 @@ export async function updateMyProfile(input: UpdateMyProfileInput) {
   if (error) throw new Error(error.message);
 
   return profileToUser(data as ProfileRow);
-
-  };
 }
 
 /**
