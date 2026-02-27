@@ -75,29 +75,32 @@ const primarySportData = SPORTS.find(s => s.id === user.primarySport);
   };
 
   useEffect(() => {
-    let mounted = true;
+  let mounted = true;
 
-    const loadOther = async () => {
-      if (!viewingOther || !id) {
-        setOther(null);
-        return;
-      }
+  const loadOther = async () => {
+    if (!viewingOther || !id) {
+      setOther(null);
+      return;
+    }
 
-      try {
-        setLoadingOther(true);
-        const u = await fetchProfileById(id);
-        if (mounted) setOther(u);
-      } finally {
-        if (mounted) setLoadingOther(false);
-      }
-    };
+    try {
+      setLoadingOther(true);
+      const u = await fetchProfileById(id);
+      console.log('[Profile] id:', id, 'fetched:', u);
+      if (mounted) setOther(u);
+    } catch (e) {
+      console.error('[Profile] loadOther failed:', e);
+      if (mounted) setOther(null);
+    } finally {
+      if (mounted) setLoadingOther(false);
+    }
+  };
 
-    void loadOther();
-    return () => {
-      mounted = false;
-    };
-  }, [viewingOther, id]);
-
+  void loadOther();
+  return () => {
+    mounted = false;
+  };
+}, [viewingOther, id]);
 
   return (
     <div className="min-h-screen bg-background pb-24 safe-top">
