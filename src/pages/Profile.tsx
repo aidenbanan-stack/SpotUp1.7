@@ -35,6 +35,35 @@ export default function Profile() {
 
   const user = viewingOther ? other : me;
 
+  // IMPORTANT: hooks must run unconditionally (before any early returns)
+  useEffect(() => {
+    let mounted = true;
+
+    const loadOther = async () => {
+      if (!viewingOther || !id) {
+        if (mounted) setOther(null);
+        return;
+      }
+
+      try {
+        setLoadingOther(true);
+        const u = await fetchProfileById(id);
+        console.log('[Profile] id:', id, 'fetched:', u);
+        if (mounted) setOther(u);
+      } catch (e) {
+        console.error('[Profile] loadOther failed:', e);
+        if (mounted) setOther(null);
+      } finally {
+        if (mounted) setLoadingOther(false);
+      }
+    };
+
+    void loadOther();
+    return () => {
+      mounted = false;
+    };
+  }, [viewingOther, id]);
+
   if (!me) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -55,7 +84,8 @@ export default function Profile() {
     );
   }
 
-  if (viewingOther && !user) {
+  // Only show "not found" after we have finished loading.
+  if (viewingOther && !loadingOther && !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
@@ -66,41 +96,13 @@ export default function Profile() {
     );
   }
 
-const primarySportData = SPORTS.find(s => s.id === user.primarySport);
+  const primarySportData = SPORTS.find(s => s.id === user.primarySport);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
     navigate('/');
   };
-
-  useEffect(() => {
-  let mounted = true;
-
-  const loadOther = async () => {
-    if (!viewingOther || !id) {
-      setOther(null);
-      return;
-    }
-
-    try {
-      setLoadingOther(true);
-      const u = await fetchProfileById(id);
-      console.log('[Profile] id:', id, 'fetched:', u);
-      if (mounted) setOther(u);
-    } catch (e) {
-      console.error('[Profile] loadOther failed:', e);
-      if (mounted) setOther(null);
-    } finally {
-      if (mounted) setLoadingOther(false);
-    }
-  };
-
-  void loadOther();
-  return () => {
-    mounted = false;
-  };
-}, [viewingOther, id]);
 
   return (
     <div className="min-h-screen bg-background pb-24 safe-top">
