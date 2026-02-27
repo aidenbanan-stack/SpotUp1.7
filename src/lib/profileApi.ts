@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabaseClient';
-import type { Sport, User } from '@/types';
+import { PLAYER_LEVELS, type PlayerLevel, type Sport, type User } from '@/types';
 
 type PublicProfileRow = {
   id: string;
@@ -39,6 +39,16 @@ function emailToUsername(email: string): string {
   return base.replace(/[^a-zA-Z0-9_\.]/g, '').slice(0, 18) || 'player';
 }
 
+function levelFromXP(xp: number): PlayerLevel {
+  const value = Number.isFinite(xp) ? xp : 0;
+  // Find the highest level whose minXP is <= xp.
+  let current: PlayerLevel = PLAYER_LEVELS[0].id;
+  for (const lvl of PLAYER_LEVELS) {
+    if (value >= lvl.minXP) current = lvl.id;
+  }
+  return current;
+}
+
 function profileToUser(row: ProfileRow): User {
   const email = row.email ?? '';
   const username = row.username ?? (email ? emailToUsername(email) : 'player');
@@ -61,7 +71,7 @@ function profileToUser(row: ProfileRow): User {
 
     stats: { gamesPlayed: 0, gamesHosted: 0, reliability: row.reliability_score ?? 100 },
     xp: row.xp ?? 0,
-    level: 'rookie',
+    level: levelFromXP(row.xp ?? 0),
     badges: [],
     reliabilityStats: {
       showUps: row.show_ups ?? 0,
@@ -94,7 +104,7 @@ function publicProfileToUser(row: PublicProfileRow): User {
     onboardingCompleted: true,
     stats: { gamesPlayed: 0, gamesHosted: 0, reliability: 100 },
     xp: 0,
-    level: 'rookie',
+    level: levelFromXP(row.xp ?? 0),
     badges: [],
     reliabilityStats: { showUps: 0, cancellations: 0, noShows: 0, score: 100 },
     votesReceived: { bestScorer: 0, bestDefender: 0, bestTeammate: 0 },
