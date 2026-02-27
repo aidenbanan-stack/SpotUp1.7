@@ -267,3 +267,85 @@ begin
     where id = p_reported_user;
 end;
 $$;
+
+-- -----------------------------------------------------------------------------
+-- MESSAGING: prevent duplicate direct chats + support game invites
+-- -----------------------------------------------------------------------------
+
+-- Conversations: store the normalized (user1_id, user2_id) pair for 1:1 DMs.
+alter table if exists public.conversations
+  add column if not exists user1_id uuid references auth.users(id) on delete cascade,
+  add column if not exists user2_id uuid references auth.users(id) on delete cascade,
+  add column if not exists created_at timestamptz not null default now();
+
+create unique index if not exists conversations_direct_pair_unique
+  on public.conversations (user1_id, user2_id)
+  where user1_id is not null and user2_id is not null;
+
+-- Conversation members: ensure no duplicate memberships.
+alter table if exists public.conversation_members
+  add constraint if not exists conversation_members_unique unique (conversation_id, user_id);
+
+-- Messages: type + meta payload for things like game invites.
+alter table if exists public.messages
+  add column if not exists type text not null default 'text',
+  add column if not exists meta jsonb;
+
+alter table if exists public.messages
+  add constraint if not exists messages_type_check check (type in ('text','game_invite'));
+
+-- Backfill user1_id/user2_id for existing 1:1 conversations (based on conversation_members).
+with pairs as (
+  select conversation_id,
+         min(user_id) as u1,
+         max(user_id) as u2
+  from public.conversation_members
+  group by conversation_id
+  having count(*) = 2
+)
+update public.conversations c
+set user1_id = p.u1,
+    user2_id = p.u2
+from pairs p
+where c.id = p.conversation_id
+  and (c.user1_id is null or c.user2_id is null);
+
+-- OPTIONAL CLEANUP: delete duplicate direct conversations, keeping the oldest one.
+-- This clears duplicate rows that were created before the unique index existed.
+-- Run once, then keep the unique index.
+with pair_convs as (
+  select c.id, c.created_at, c.user1_id, c.user2_id
+  from public.conversations c
+  where c.user1_id is not null and c.user2_id is not null
+), ranked as (
+  select *, row_number() over (partition by user1_id, user2_id order by created_at asc, id asc) as rn
+  from pair_convs
+), dupe_ids as (
+  select id from ranked where rn > 1
+)
+delete from public.messages where conversation_id in (select id from dupe_ids);
+
+with dupe_ids as (
+  select id
+  from (
+    select c.id, row_number() over (partition by c.user1_id, c.user2_id order by c.created_at asc, c.id asc) as rn
+    from public.conversations c
+    where c.user1_id is not null and c.user2_id is not null
+  ) x
+  where rn > 1
+)
+delete from public.conversation_members where conversation_id in (select id from dupe_ids);
+
+with dupe_ids as (
+  select id
+  from (
+    select c.id, row_number() over (partition by c.user1_id, c.user2_id order by c.created_at asc, c.id asc) as rn
+    from public.conversations c
+    where c.user1_id is not null and c.user2_id is not null
+  ) x
+  where rn > 1
+)
+delete from public.conversations where id in (select id from dupe_ids);
+
+-- OPTIONAL NUCLEAR RESET (dev only): clears all messaging.
+-- truncate table public.messages, public.conversation_members, public.conversations, public.message_requests;

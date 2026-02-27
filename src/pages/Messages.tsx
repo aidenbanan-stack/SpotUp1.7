@@ -3,23 +3,28 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, MessageCircle, Search, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useApp } from '@/context/AppContext';
+import { format } from 'date-fns';
 import { fetchMyFriendIds } from '@/lib/socialApi';
 import { searchProfiles } from '@/lib/profileApi';
 import type { User } from '@/types';
+import { fetchGameById, joinGame } from '@/lib/gamesApi';
 import {
   acceptMessageRequest,
-  createConversationWithUser,
   fetchMessages,
   fetchMyConversations,
   fetchMyMessageRequests,
   rejectMessageRequest,
   sendMessage,
+  sendGameInvite,
   sendMessageRequest,
+  getOrCreateConversationWithUser,
   type Conversation,
   type Message,
   type MessageRequest,
@@ -27,7 +32,7 @@ import {
 
 export default function Messages() {
   const navigate = useNavigate();
-  const { user } = useApp();
+  const { user, games } = useApp();
 
   const [loading, setLoading] = useState(true);
   const [friendIds, setFriendIds] = useState<string[]>([]);
@@ -38,6 +43,10 @@ export default function Messages() {
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState('');
+
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteGameId, setInviteGameId] = useState<string>('');
+  const [inviteNote, setInviteNote] = useState('');
 
   const [search, setSearch] = useState('');
   const [searching, setSearching] = useState(false);
@@ -119,7 +128,7 @@ export default function Messages() {
 
     if (isFriend(other.id)) {
       try {
-        const convId = await createConversationWithUser(other.id);
+        const convId = await getOrCreateConversationWithUser(other.id);
         const conv: Conversation = {
           id: convId,
           createdAt: new Date(),
@@ -186,6 +195,44 @@ export default function Messages() {
   }
 
   if (mode === 'chat' && activeConv) {
+    const myUpcomingHosted = (games ?? [])
+      .filter((g) => g.hostId === user?.id)
+      .filter((g) => g.status === 'scheduled')
+      .filter((g) => +new Date(g.dateTime) > Date.now())
+      .sort((a, b) => +new Date(a.dateTime) - +new Date(b.dateTime));
+
+    const handleSendInvite = async () => {
+      if (!activeConv) return;
+      if (!inviteGameId) {
+        toast.error('Pick a game first.');
+        return;
+      }
+      try {
+        await sendGameInvite(activeConv.id, inviteGameId, inviteNote);
+        setInviteOpen(false);
+        setInviteGameId('');
+        setInviteNote('');
+        const msgs = await fetchMessages(activeConv.id);
+        setMessages(msgs);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to send invite.';
+        toast.error(msg);
+      }
+    };
+
+    const handleJoinInvite = async (gameId: string) => {
+      if (!user) return;
+      try {
+        const g = await fetchGameById(gameId);
+        await joinGame(gameId, user.id, g.isPrivate);
+        toast.success('Joined (or requested) successfully.');
+        navigate(`/game/${gameId}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to join.';
+        toast.error(msg);
+      }
+    };
+
     return (
       <div className="min-h-screen bg-background pb-24 safe-top">
         <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/50">
@@ -224,8 +271,29 @@ export default function Messages() {
               const mine = m.senderId === user?.id;
               return (
                 <div key={m.id} className={cn('flex', mine ? 'justify-end' : 'justify-start')}>
-                  <div className={cn('max-w-[80%] rounded-2xl px-4 py-2 text-sm', mine ? 'bg-primary text-primary-foreground' : 'bg-secondary/60')}>
-                    {m.body}
+                  <div className={cn('max-w-[80%]')}
+                  >
+                    {m.type === 'game_invite' ? (
+                      <div className={cn('rounded-2xl px-4 py-3 text-sm border border-border/50', mine ? 'bg-primary/10' : 'bg-secondary/60')}>
+                        <div className="font-semibold text-foreground">Game invite</div>
+                        {m.body ? <div className="text-muted-foreground mt-1">{m.body}</div> : null}
+                        <div className="mt-3 flex gap-2">
+                          <Button size="sm" onClick={() => navigate(`/game/${m.meta?.game_id}`)}>
+                            View
+                          </Button>
+                          <Button size="sm" variant="secondary" onClick={() => handleJoinInvite(String(m.meta?.game_id))}>
+                            Join
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className={cn('rounded-2xl px-4 py-2 text-sm', mine ? 'bg-primary text-primary-foreground' : 'bg-secondary/60')}>
+                        {m.body}
+                      </div>
+                    )}
+                    <div className={cn('mt-1 text-[11px] text-muted-foreground', mine ? 'text-right' : 'text-left')}>
+                      {format(m.createdAt, 'MMM d, h:mm a')}
+                    </div>
                   </div>
                 </div>
               );
@@ -236,6 +304,45 @@ export default function Messages() {
         <div className="fixed bottom-20 left-0 right-0 px-4">
           <div className="max-w-2xl mx-auto flex gap-2">
             <Input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Type a message..." />
+
+            <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+              <DialogTrigger asChild>
+                <Button variant="secondary">Invite</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Send a game invite</DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-3">
+                  <Select value={inviteGameId} onValueChange={setInviteGameId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pick one of your upcoming games" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {myUpcomingHosted.length === 0 ? (
+                        <SelectItem value="none" disabled>
+                          No upcoming hosted games
+                        </SelectItem>
+                      ) : (
+                        myUpcomingHosted.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            {g.title} ({format(new Date(g.dateTime), 'MMM d, h:mm a')})
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+
+                  <Input value={inviteNote} onChange={(e) => setInviteNote(e.target.value)} placeholder="Optional note" />
+                </div>
+
+                <DialogFooter>
+                  <Button onClick={handleSendInvite}>Send invite</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             <Button onClick={handleSend} className="gap-2">
               <Send className="w-4 h-4" />
               Send

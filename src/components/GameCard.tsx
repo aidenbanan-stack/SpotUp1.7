@@ -3,6 +3,7 @@ import { SportIcon, SportBadge } from './SportIcon';
 import { cn } from '@/lib/utils';
 import { MapPin, Clock, Users, Lock } from 'lucide-react';
 import { format } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 
 function safeFormatDateTime(value: any) {
   try {
@@ -44,6 +45,7 @@ export function GameCard({
   className,
   viewerUserId,
 }: GameCardProps) {
+  const navigate = useNavigate();
   const dt = safeFormatDateTime(game.dateTime);
   const isUpcoming = dt ? dt.date > new Date() : false;
 
@@ -169,14 +171,22 @@ export function GameCard({
             className="w-8 h-8 rounded-full object-cover"
           />
 
-          <div>
+          <button
+            type="button"
+            className="text-left"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              navigate(`/profile/${game.hostId}`);
+            }}
+          >
             <span className="text-xs text-muted-foreground">
               Hosted by
             </span>
             <p className="text-sm font-medium text-foreground">
               {game.host.username}
             </p>
-          </div>
+          </button>
         </div>
       )}
     </button>

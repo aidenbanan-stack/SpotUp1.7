@@ -14,6 +14,8 @@ export type Message = {
   conversationId: string;
   senderId: string;
   body: string;
+  type: 'text' | 'game_invite';
+  meta?: any;
   createdAt: Date;
 };
 
@@ -190,22 +192,7 @@ export async function acceptMessageRequest(requestId: string): Promise<string> {
   if (req.to_user_id !== me.id) throw new Error('Not allowed.');
   if (req.status !== 'pending') throw new Error('Request is not pending.');
 
-  const conversationId = newConversationId();
-
-  const { error: cErr } = await supabase.from('conversations').insert({ id: conversationId });
-  if (cErr) throw cErr;
-
-  const { error: m1Err } = await supabase.from('conversation_members').insert({
-    conversation_id: conversationId,
-    user_id: me.id,
-  });
-  if (m1Err) throw m1Err;
-
-  const { error: m2Err } = await supabase.from('conversation_members').insert({
-    conversation_id: conversationId,
-    user_id: req.from_user_id,
-  });
-  if (m2Err) throw m2Err;
+  const conversationId = await getOrCreateConversationWithUser(req.from_user_id);
 
   const { error: uErr } = await supabase.from('message_requests').update({ status: 'accepted' }).eq('id', requestId);
   if (uErr) throw uErr;
@@ -216,6 +203,7 @@ export async function acceptMessageRequest(requestId: string): Promise<string> {
       conversation_id: conversationId,
       sender_id: req.from_user_id,
       body: first,
+      type: 'text',
     });
     if (msgErr) throw msgErr;
   }
@@ -311,7 +299,7 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
 export async function fetchMessages(conversationId: string): Promise<Message[]> {
   const { data, error } = await supabase
     .from('messages')
-    .select('id,conversation_id,sender_id,body,created_at')
+    .select('id,conversation_id,sender_id,body,type,meta,created_at')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true })
     .limit(200);
@@ -323,6 +311,8 @@ export async function fetchMessages(conversationId: string): Promise<Message[]> 
     conversationId: r.conversation_id,
     senderId: r.sender_id,
     body: r.body,
+    type: (r.type ?? 'text') as 'text' | 'game_invite',
+    meta: r.meta ?? undefined,
     createdAt: new Date(r.created_at),
   }));
 }
@@ -336,30 +326,80 @@ export async function sendMessage(conversationId: string, body: string): Promise
     conversation_id: conversationId,
     sender_id: me.id,
     body: text,
+    type: 'text',
   });
 
   if (error) throw error;
 }
 
-export async function createConversationWithUser(otherUserId: string): Promise<string> {
+export async function sendGameInvite(conversationId: string, gameId: string, note?: string): Promise<void> {
   const me = await requireMe();
+  const body = (note ?? '').trim();
 
-  const conversationId = newConversationId();
-
-  const { error: cErr } = await supabase.from('conversations').insert({ id: conversationId });
-  if (cErr) throw cErr;
-
-  const { error: m1Err } = await supabase.from('conversation_members').insert({
+  const { error } = await supabase.from('messages').insert({
     conversation_id: conversationId,
-    user_id: me.id,
+    sender_id: me.id,
+    body,
+    type: 'game_invite',
+    meta: { game_id: gameId },
   });
-  if (m1Err) throw m1Err;
 
-  const { error: m2Err } = await supabase.from('conversation_members').insert({
-    conversation_id: conversationId,
-    user_id: otherUserId,
-  });
-  if (m2Err) throw m2Err;
+  if (error) throw error;
+}
+
+function normalizePair(a: string, b: string): { user1: string; user2: string } {
+  // Sort lexicographically so (A,B) and (B,A) map to the same row.
+  return a < b ? { user1: a, user2: b } : { user1: b, user2: a };
+}
+
+export async function getOrCreateConversationWithUser(otherUserId: string): Promise<string> {
+  const me = await requireMe();
+  const { user1, user2 } = normalizePair(me.id, otherUserId);
+
+  const { data: existing, error: findErr } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('user1_id', user1)
+    .eq('user2_id', user2)
+    .maybeSingle();
+
+  if (findErr) throw findErr;
+
+  const conversationId = existing?.id ?? newConversationId();
+
+  if (!existing?.id) {
+    const { error: cErr } = await supabase.from('conversations').insert({
+      id: conversationId,
+      user1_id: user1,
+      user2_id: user2,
+    });
+
+    if (cErr) {
+      const msg = (cErr as any)?.message ?? '';
+      const code = (cErr as any)?.code ?? '';
+      if (String(code) === '23505' || msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('unique')) {
+        const { data: again, error: againErr } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('user1_id', user1)
+          .eq('user2_id', user2)
+          .single();
+        if (againErr) throw againErr;
+        return again.id;
+      }
+      throw cErr;
+    }
+  }
+
+  // Ensure memberships exist. If your conversation_members table has a unique
+  // constraint on (conversation_id, user_id) this will stay idempotent.
+  await supabase
+    .from('conversation_members')
+    .insert([
+      { conversation_id: conversationId, user_id: me.id },
+      { conversation_id: conversationId, user_id: otherUserId },
+    ])
+    .catch(() => undefined);
 
   return conversationId;
 }

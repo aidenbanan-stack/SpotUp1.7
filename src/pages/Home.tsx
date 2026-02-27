@@ -140,31 +140,20 @@ const filteredGames = selectedSport === 'all'
       <main className="px-4 py-6 space-y-6 max-w-3xl mx-auto">
         {/* Sport filter row (safe, supports 'all', no SportSelector crash) */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setSelectedSport('all')}
-              className={`px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
-                selectedSport === 'all'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-secondary/60 hover:bg-secondary text-foreground'
-              }`}
-            >
-              All
-            </button>
-
-            {SPORTS.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => setSelectedSport(s.id)}
-                className={`px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
-                  selectedSport === s.id
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-secondary/60 hover:bg-secondary text-foreground'
-                }`}
-              >
-                {s.name}
-              </button>
-            ))}
+          <div className="w-full sm:w-64">
+            <Select value={selectedSport} onValueChange={(v) => setSelectedSport(v as SportFilter)}>
+              <SelectTrigger className="h-10 rounded-xl bg-secondary/60">
+                <SelectValue placeholder="Sport" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All sports</SelectItem>
+                {SPORTS.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="flex gap-2">

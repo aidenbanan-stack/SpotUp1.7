@@ -287,12 +287,19 @@ export default function GameDetail() {
         </section>
 
         {game.host && (
-          <section className="glass-card p-4 flex items-center gap-4 animate-fade-in" style={{ animationDelay: '50ms' }}>
+          <section
+            className="glass-card p-4 flex items-center gap-4 animate-fade-in"
+            style={{ animationDelay: '50ms' }}
+          >
             <img src={game.host.profilePhotoUrl} alt={game.host.username} className="w-12 h-12 rounded-full object-cover" />
-            <div className="flex-1">
+            <button
+              type="button"
+              className="flex-1 text-left"
+              onClick={() => navigate(`/profile/${game.hostId}`)}
+            >
               <span className="text-xs text-muted-foreground">Hosted by</span>
               <p className="font-semibold text-foreground">{game.host.username}</p>
-            </div>
+            </button>
             {isHost && (
               <span className="px-3 py-1 bg-primary/20 text-primary text-xs font-medium rounded-full">
                 You're hosting
