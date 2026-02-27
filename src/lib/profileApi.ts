@@ -6,6 +6,7 @@ type PublicProfileRow = {
   username: string | null;
   profile_photo_url: string | null;
   bio?: string | null;
+  xp?: number | null;
 };
 
 type ProfileRow = {
@@ -178,24 +179,34 @@ export async function getOrCreateMyProfile(): Promise<User> {
  * Returns null if the profile does not exist.
  */
 export async function fetchProfileById(id: string): Promise<User | null> {
-  try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select(
-        'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed,xp,show_ups,cancellations,no_shows,reliability_score'
-      )
-      .eq('id', id)
-      .maybeSingle();
+  // 1) Try direct table read (works if RLS allows it)
+  const { data, error } = await supabase
+    .from('profiles')
+    .select(
+      'id,email,username,profile_photo_url,bio,age,height,city,primary_sport,secondary_sports,onboarding_completed,xp,show_ups,cancellations,no_shows,reliability_score'
+    )
+    .eq('id', id)
+    .maybeSingle();
 
-    if (error) throw error;
-    return data ? profileToUser(data as ProfileRow) : null;
-  } catch (err: any) {
-    // RLS can block reading other users' profiles. Fall back to a safe public RPC.
-    const { data, error } = await supabase.rpc('get_public_profiles', { p_user_ids: [id] });
-    if (error) throw err;
-    const row = (data?.[0] ?? null) as any;
-    return row ? publicProfileToUser(row as PublicProfileRow) : null;
+  if (error) {
+    console.error('fetchProfileById direct select error:', error);
   }
+
+  // Important: if RLS blocks, data will be null with NO error.
+  if (data) return profileToUser(data as ProfileRow);
+
+  // 2) Fall back to safe RPC for public fields
+  const { data: rpcData, error: rpcError } = await supabase.rpc('get_public_profiles', {
+    p_user_ids: [id],
+  });
+
+  if (rpcError) {
+    console.error('fetchProfileById RPC error:', rpcError);
+    return null;
+  }
+
+  const row = (rpcData?.[0] ?? null) as any;
+  return row ? publicProfileToUser(row as PublicProfileRow) : null;
 }
 
 /**
