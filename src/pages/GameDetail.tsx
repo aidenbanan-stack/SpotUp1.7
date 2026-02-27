@@ -3,21 +3,18 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { SportIcon, SportBadge } from '@/components/SportIcon';
+import { PlayerLevelBadge } from '@/components/PlayerLevelBadge';
 import { ArrowLeft, Calendar, Clock, Lock, MapPin, Share2, Users } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { approveJoinRequest, deleteGame, joinGame, leaveGame, rejectJoinRequest, setGameStatus } from '@/lib/gamesApi';
 import { fetchProfilesByIds, getOrCreateMyProfile } from '@/lib/profileApi';
 import { awardXp } from '@/lib/xpApi';
-import PlayerProfileDialog from '@/components/PlayerProfileDialog';
 
 export default function GameDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { games, setGames, user, setUser } = useApp();
-
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
   const [pendingProfiles, setPendingProfiles] = useState<any[]>([]);
   const [pendingBusy, setPendingBusy] = useState<string | null>(null);
@@ -73,8 +70,7 @@ export default function GameDetail() {
   const canViewLive = (isHost || isJoined) && isLive;
 
   const openProfile = (userId: string) => {
-    setSelectedUserId(userId);
-    setProfileOpen(true);
+    navigate(`/profile/${userId}`);
   };
 
   useEffect(() => {
@@ -422,15 +418,24 @@ export default function GameDetail() {
               <button
                 key={player.id}
                 onClick={() => openProfile(player.id)}
-                className="flex items-center gap-2 glass-card p-2 pr-4 text-left hover:opacity-90"
+                className="flex items-center justify-between gap-2 glass-card p-2 pr-3 text-left hover:opacity-90"
                 type="button"
               >
-                <img
-                  src={player.profilePhotoUrl}
-                  alt={player.username}
-                  className="w-8 h-8 rounded-full object-cover"
+                <div className="flex items-center gap-2 min-w-0">
+                  <img
+                    src={player.profilePhotoUrl}
+                    alt={player.username}
+                    className="w-8 h-8 rounded-full object-cover"
+                  />
+                  <span className="text-sm font-medium truncate">{player.username}</span>
+                </div>
+
+                <PlayerLevelBadge
+                  level={player.level}
+                  xp={player.xp}
+                  size="sm"
+                  className="shrink-0"
                 />
-                <span className="text-sm font-medium truncate">{player.username}</span>
               </button>
             ))}
 
@@ -442,8 +447,6 @@ export default function GameDetail() {
             ))}
           </div>
         </section>
-
-        <PlayerProfileDialog open={profileOpen} onOpenChange={setProfileOpen} userId={selectedUserId} />
       </main>
 
       <div className="fixed left-0 right-0 bottom-24 md:bottom-28 z-50 px-4 safe-bottom">

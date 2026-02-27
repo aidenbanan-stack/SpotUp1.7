@@ -1,4 +1,5 @@
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { SportIcon, SportBadge } from '@/components/SportIcon';
@@ -7,6 +8,7 @@ import { BadgeDisplay } from '@/components/BadgeDisplay';
 import { ReliabilityScore } from '@/components/ReliabilityScore';
 import { HostReputationCard } from '@/components/HostReputationCard';
 import { 
+  ArrowLeft,
   Calendar, 
   Edit2, 
   LogOut, 
@@ -18,14 +20,22 @@ import {
   Zap,
   Award
 } from 'lucide-react';
-import { SPORTS } from '@/types';
+import { SPORTS, type User as UserType } from '@/types';
 import { supabase } from '@/lib/supabaseClient';
+import { fetchProfileById } from '@/lib/profileApi';
 
 export default function Profile() {
   const navigate = useNavigate();
-  const { user, setUser } = useApp();
+  const { user: me, setUser } = useApp();
+  const { id } = useParams();
+  const [other, setOther] = useState<UserType | null>(null);
+  const [loadingOther, setLoadingOther] = useState(false);
 
-  if (!user) {
+  const viewingOther = useMemo(() => Boolean(id && me && id !== me.id), [id, me]);
+
+  const user = viewingOther ? other : me;
+
+  if (!me) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
@@ -36,7 +46,27 @@ export default function Profile() {
     );
   }
 
-  const primarySportData = SPORTS.find(s => s.id === user.primarySport);
+  
+  if (viewingOther && loadingOther) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Loading profile...</p>
+      </div>
+    );
+  }
+
+  if (viewingOther && !user) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-muted-foreground mb-4">Profile not found</p>
+          <Button onClick={() => navigate(-1)}>Go back</Button>
+        </div>
+      </div>
+    );
+  }
+
+const primarySportData = SPORTS.find(s => s.id === user.primarySport);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -44,18 +74,57 @@ export default function Profile() {
     navigate('/');
   };
 
+  useEffect(() => {
+    let mounted = true;
+
+    const loadOther = async () => {
+      if (!viewingOther || !id) {
+        setOther(null);
+        return;
+      }
+
+      try {
+        setLoadingOther(true);
+        const u = await fetchProfileById(id);
+        if (mounted) setOther(u);
+      } finally {
+        if (mounted) setLoadingOther(false);
+      }
+    };
+
+    void loadOther();
+    return () => {
+      mounted = false;
+    };
+  }, [viewingOther, id]);
+
+
   return (
     <div className="min-h-screen bg-background pb-24 safe-top">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/50">
         <div className="flex items-center justify-between px-4 py-3">
-          <h1 className="text-xl font-bold">Profile</h1>
-          <button
-            onClick={() => navigate('/settings')}
-            className="p-2 rounded-xl bg-secondary/60"
-          >
-            <Settings className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {viewingOther ? (
+              <button
+                onClick={() => navigate(-1)}
+                className="p-2 rounded-xl bg-secondary/60"
+                aria-label="Back"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+            ) : null}
+            <h1 className="text-xl font-bold">{viewingOther ? user.username : 'Profile'}</h1>
+          </div>
+
+          {!viewingOther ? (
+            <button
+              onClick={() => navigate('/settings')}
+              className="p-2 rounded-xl bg-secondary/60"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -68,9 +137,15 @@ export default function Profile() {
               alt={user.username}
               className="w-24 h-24 rounded-full object-cover border-4 border-background shadow-glow"
             />
-            <button onClick={() => navigate('/edit-profile')} className="absolute bottom-0 right-0 p-2 bg-primary rounded-full shadow-lg" aria-label="Edit profile photo">
-              <Edit2 className="w-4 h-4 text-primary-foreground" />
-            </button>
+            {!viewingOther ? (
+              <button
+                onClick={() => navigate('/edit-profile')}
+                className="absolute bottom-0 right-0 p-2 bg-primary rounded-full shadow-lg"
+                aria-label="Edit profile photo"
+              >
+                <Edit2 className="w-4 h-4 text-primary-foreground" />
+              </button>
+            ) : null}
           </div>
           <h2 className="text-2xl font-bold text-foreground mb-1">{user.username}</h2>
           <div className="flex items-center justify-center gap-2 text-muted-foreground mb-3">
@@ -87,13 +162,18 @@ export default function Profile() {
             {user.bio ? (
               <p className="whitespace-pre-line">{user.bio}</p>
             ) : (
-              <button
-                onClick={() => navigate('/edit-profile')}
-                className="underline underline-offset-4 hover:text-foreground transition-colors"
-              >
-                Add a bio to your profile
-              </button>
-            )}
+              viewingOther ? (
+                <p>No bio yet</p>
+              ) : (
+                <button
+                  onClick={() => navigate('/edit-profile')}
+                  className="underline underline-offset-4 hover:text-foreground transition-colors"
+                >
+                  Add a bio to your profile
+                </button>
+              )
+            )
+          }
           </div>
         </section>
 
@@ -217,14 +297,16 @@ export default function Profile() {
         {/* Quick Actions removed: moved to Home header */}
 
         {/* Logout */}
-        <Button
-          variant="ghost"
-          className="w-full text-destructive hover:text-destructive hover:bg-destructive/10"
-          onClick={handleLogout}
-        >
-          <LogOut className="w-5 h-5 mr-2" />
-          Sign Out
-        </Button>
+        {!viewingOther ? (
+          <Button
+            variant="ghost"
+            className="w-full text-destructive hover:text-destructive hover:bg-destructive/10"
+            onClick={handleLogout}
+          >
+            <LogOut className="w-5 h-5 mr-2" />
+            Sign Out
+          </Button>
+        ) : null}
       </main>
     </div>
   );
