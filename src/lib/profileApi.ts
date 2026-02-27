@@ -49,6 +49,7 @@ function levelFromXP(xp: number): PlayerLevel {
   return current;
 }
 
+
 function profileToUser(row: ProfileRow): User {
   const email = row.email ?? '';
   const username = row.username ?? (email ? emailToUsername(email) : 'player');
