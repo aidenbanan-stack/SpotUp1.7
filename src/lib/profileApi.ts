@@ -179,7 +179,7 @@ export async function getOrCreateMyProfile(): Promise<User> {
  * Returns null if the profile does not exist.
  */
 export async function fetchProfileById(id: string): Promise<User | null> {
-  // 1) Try direct table read (works if RLS allows it)
+  // Try direct table read first
   const { data, error } = await supabase
     .from('profiles')
     .select(
@@ -188,22 +188,18 @@ export async function fetchProfileById(id: string): Promise<User | null> {
     .eq('id', id)
     .maybeSingle();
 
-  if (error) {
-    console.error('fetchProfileById direct select error:', error);
-  }
+  console.log('[fetchProfileById] direct data:', data, 'error:', error);
 
-  // Important: if RLS blocks, data will be null with NO error.
   if (data) return profileToUser(data as ProfileRow);
 
-  // 2) Fall back to safe RPC for public fields
+  // Always try RPC if direct didn't return data (even if error is null)
   const { data: rpcData, error: rpcError } = await supabase.rpc('get_public_profiles', {
     p_user_ids: [id],
   });
 
-  if (rpcError) {
-    console.error('fetchProfileById RPC error:', rpcError);
-    return null;
-  }
+  console.log('[fetchProfileById] rpc data:', rpcData, 'rpc error:', rpcError);
+
+  if (rpcError) return null;
 
   const row = (rpcData?.[0] ?? null) as any;
   return row ? publicProfileToUser(row as PublicProfileRow) : null;
