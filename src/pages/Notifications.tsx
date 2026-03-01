@@ -2,13 +2,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Bell, Calendar, Check, UserPlus, X } from 'lucide-react';
+import { ArrowLeft, Bell, Calendar, Check, MoreVertical, UserPlus, X } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { acceptFriendRequest, rejectFriendRequest } from '@/lib/socialApi';
 import { fetchProfileById } from '@/lib/profileApi';
 import { toast } from 'sonner';
 import { clearMyNotifications, clearMyReadNotifications, deleteNotification, markNotificationRead } from '@/lib/notificationsApi';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 export default function Notifications() {
   const navigate = useNavigate();
@@ -55,7 +62,7 @@ export default function Notifications() {
     setNotifications(notifications.map(n => (n.id === id ? { ...n, read: true } : n)));
     // Best-effort sync to DB.
     void markNotificationRead(id).catch(() => undefined);
-};
+  };
 
 
   const handleClearRead = async () => {
@@ -134,22 +141,34 @@ export default function Notifications() {
     <div className="min-h-screen bg-background pb-24 safe-top">
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/50">
         <div className="flex items-center justify-between px-4 py-3">
-          <Button variant="ghost" onClick={() => navigate(-1)} className="gap-2 -ml-2">
-            <ArrowLeft className="w-4 h-4" />
-            Back
-          </Button>
+          <button
+            onClick={() => navigate(-1)}
+            className="p-2 rounded-xl bg-secondary/60"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+
           <h1 className="text-lg font-bold">Notifications</h1>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={handleClearRead} className="text-sm">
-              Clear read
-            </Button>
-            <Button variant="ghost" onClick={markAllAsRead} className="text-sm">
-              Mark all read
-            </Button>
-            <Button variant="ghost" onClick={handleClearAll} className="text-sm text-destructive">
-              Clear all
-            </Button>
-          </div>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="p-2 rounded-xl bg-secondary/60"
+                aria-label="Notification actions"
+              >
+                <MoreVertical className="w-5 h-5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={markAllAsRead}>Mark all as read</DropdownMenuItem>
+              <DropdownMenuItem onClick={handleClearRead}>Clear read</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive" onClick={handleClearAll}>
+                Clear all
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 

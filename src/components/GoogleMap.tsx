@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { GoogleMap as GoogleMapComponent, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
-import { Game } from '@/types';
-import { SportIcon } from './SportIcon';
+import { Game, SPORTS } from '@/types';
 import { Lock } from 'lucide-react';
 import { GOOGLE_MAPS_API_KEY, hasGoogleMapsKey } from '@/lib/env';
 import { getBrowserLocation, LatLng } from '@/lib/geo';
@@ -48,11 +47,15 @@ const sportColors: Record<string, string> = {
   basketball: '#f97316',
   soccer: '#22c55e',
   pickleball: '#0ea5e9',
-  'flag-football': '#a855f7',
+  football: '#a855f7',
   baseball: '#eab308',
   volleyball: '#ec4899',
-  'ultimate-frisbee': '#06b6d4',
+  frisbee: '#06b6d4',
 };
+
+function sportEmoji(sport: string) {
+  return SPORTS.find((s) => s.id === (sport as any))?.icon ?? '📍';
+}
 
 export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleMapProps) {
   // If the key is missing, do not attempt to load Maps (prevents runtime/deploy errors).
@@ -152,11 +155,20 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleM
             onClick={() => onGameSelect(game)}
             icon={{
               path: google.maps.SymbolPath.CIRCLE,
-              scale: 12,
+              // Slightly larger marker so it is easier to tap on mobile.
+              scale: 16,
               fillColor: sportColors[game.sport] || '#E50914',
               fillOpacity: 1,
               strokeColor: '#ffffff',
               strokeWeight: 2,
+              // Center the label within the circle.
+              labelOrigin: new google.maps.Point(0, 0),
+            }}
+            label={{
+              text: sportEmoji(game.sport),
+              color: '#ffffff',
+              fontSize: '16px',
+              fontWeight: '700',
             }}
           />
         );

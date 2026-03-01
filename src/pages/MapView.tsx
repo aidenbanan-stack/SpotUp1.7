@@ -14,7 +14,7 @@ import { getBrowserLocation, LatLng } from '@/lib/geo';
 
 export default function MapView() {
   const navigate = useNavigate();
-  const { selectedSport, setSelectedSport, games } = useApp();
+  const { user, selectedSport, setSelectedSport, games } = useApp();
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const [center, setCenter] = useState<LatLng | undefined>(undefined);
   const [showFilters, setShowFilters] = useState(false);
