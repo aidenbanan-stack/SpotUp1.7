@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
+import { createTournament } from '@/lib/tournamentsApi';
+
 import { 
   TournamentFormat, 
   SeriesType, 
@@ -69,24 +71,47 @@ export default function CreateTournament() {
     return null;
   }
 
-  const handleSubmit = () => {
-    if (!name.trim()) {
-      toast.error('Please enter a tournament name');
-      return;
-    }
-    if (!location.areaName) {
-      toast.error('Please select a location');
-      return;
-    }
-    if (!dateTime) {
-      toast.error('Please select a date and time');
-      return;
-    }
+  
+const handleSubmit = async () => {
+  if (!user?.id) {
+    toast.error('Please sign in first');
+    return;
+  }
+  if (!name.trim()) {
+    toast.error('Please enter a tournament name');
+    return;
+  }
+  if (!location.areaName) {
+    toast.error('Please select a location');
+    return;
+  }
+  if (!dateTime) {
+    toast.error('Please select a date and time');
+    return;
+  }
 
-    // In a real app, this would save to the database
-    toast.success('Tournament created successfully!');
+  try {
+    await createTournament({
+      hostId: user.id,
+      name: name.trim(),
+      sport,
+      format,
+      seriesType,
+      teamCount,
+      pointsStyle,
+      isPrivate,
+      location,
+      startsAtISO: new Date(dateTime).toISOString(),
+      notes: notes.trim() ? notes.trim() : null,
+    });
+
+    toast.success('Tournament created!');
     navigate('/tournaments');
-  };
+  } catch (e) {
+    console.error(e);
+    toast.error('Failed to create tournament. Check Supabase tables / RLS.');
+  }
+};
 
   return (
     <div className="min-h-screen bg-background pb-24 safe-top">
