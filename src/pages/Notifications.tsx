@@ -95,6 +95,9 @@ export default function Notifications() {
     switch (type) {
       case 'friend_request':
         return <UserPlus className="w-5 h-5 text-blue-500" />;
+      case 'message_request':
+      case 'new_message':
+        return <Bell className="w-5 h-5 text-primary" />;
       case 'game_invite':
         return <Calendar className="w-5 h-5 text-green-500" />;
       case 'game_approved':
@@ -201,6 +204,13 @@ export default function Notifications() {
                     // Friend requests should keep their action buttons visible until accepted/rejected.
                     if (notification.type !== 'friend_request') {
                       markAsReadLocal(notification.id);
+                    }
+
+                    if (notification.type === 'game_invite' && notification.relatedGameId) {
+                      navigate(`/game/${notification.relatedGameId}`);
+                    }
+                    if ((notification.type === 'message_request' || notification.type === 'new_message')) {
+                      navigate('/messages');
                     }
                   }}
                 >

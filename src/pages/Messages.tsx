@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, MessageCircle, Search, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -29,6 +29,9 @@ import {
   type Message,
   type MessageRequest,
 } from '@/lib/messagesApi';
+import { supabase } from '@/lib/supabaseClient';
+import { isConversationUnread, setConversationLastRead } from '@/lib/messageReadState';
+import { createNotification } from '@/lib/notificationsApi';
 
 export default function Messages() {
   const navigate = useNavigate();
@@ -42,6 +45,8 @@ export default function Messages() {
   const [mode, setMode] = useState<'list' | 'chat'>('list');
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const convIdsRef = useRef<string[]>([]);
+
   const [draft, setDraft] = useState('');
 
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -66,7 +71,13 @@ export default function Messages() {
         fetchMyMessageRequests().catch(() => []),
       ]);
       setFriendIds(fids);
-      setConversations(convs);
+      // Sort by most recent last message.
+      const sorted = [...convs].sort((a, b) => {
+        const ta = a.lastMessage?.createdAt ? +new Date(a.lastMessage.createdAt) : 0;
+        const tb = b.lastMessage?.createdAt ? +new Date(b.lastMessage.createdAt) : 0;
+        return tb - ta;
+      });
+      setConversations(sorted);
       setRequests(reqs.filter(r => r.status === 'pending'));
     } finally {
       setLoading(false);
@@ -84,11 +95,83 @@ export default function Messages() {
       setActiveConv(conv);
       const msgs = await fetchMessages(conv.id);
       setMessages(msgs);
+
+      // Mark as read locally.
+      setConversationLastRead(conv.id, Date.now());
+      setConversations((prev) =>
+        [...prev].map((c) => (c.id === conv.id ? { ...c } : c))
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load messages.';
       toast.error(msg);
     }
   };
+
+  // Realtime: keep conversation list fresh + unread dots.
+  useEffect(() => {
+    if (!user) return;
+    convIdsRef.current = conversations.map((c) => c.id);
+  }, [conversations, user?.id]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('messages-inbox')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          const row: any = payload.new;
+          const convId = String(row.conversation_id ?? '');
+          if (!convId) return;
+
+          // If we have a list, update last message + reorder.
+          setConversations((prev) => {
+            const idx = prev.findIndex((c) => c.id === convId);
+            if (idx === -1) return prev;
+            const next = [...prev];
+            const current = next[idx];
+            const updated: Conversation = {
+              ...current,
+              lastMessage: {
+                body: String(row.body ?? ''),
+                createdAt: new Date(row.created_at),
+                senderId: String(row.sender_id ?? ''),
+              },
+            };
+            next.splice(idx, 1);
+            return [updated, ...next];
+          });
+
+          // If we are currently in this chat, append message and mark read.
+          setMessages((prevMsgs) => {
+            if (mode !== 'chat') return prevMsgs;
+            if (!activeConv || activeConv.id !== convId) return prevMsgs;
+
+            const m: Message = {
+              id: String(row.id),
+              conversationId: convId,
+              senderId: String(row.sender_id),
+              body: String(row.body ?? ''),
+              type: (row.type ?? 'text') as any,
+              meta: row.meta ?? undefined,
+              createdAt: new Date(row.created_at),
+            };
+            // Avoid duplicates (sometimes we refetch).
+            if (prevMsgs.some((x) => x.id === m.id)) return prevMsgs;
+            setConversationLastRead(convId, Date.now());
+            return [...prevMsgs, m];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, mode, activeConv?.id]);
 
   const handleSend = async () => {
     if (!activeConv) return;
@@ -98,8 +181,41 @@ export default function Messages() {
     setDraft('');
     try {
       await sendMessage(activeConv.id, text);
+
+      // Best-effort notification for the recipient.
+      try {
+        if (activeConv.otherUserId) {
+          await createNotification({
+            userId: activeConv.otherUserId,
+            type: 'new_message',
+            relatedUserId: user?.id ?? undefined,
+            message: 'New message',
+          });
+        }
+      } catch {
+        // ignore
+      }
+
       const msgs = await fetchMessages(activeConv.id);
       setMessages(msgs);
+
+      // Update conversation preview + keep it at the top.
+      const last = msgs[msgs.length - 1];
+      if (last) {
+        setConversations((prev) => {
+          const idx = prev.findIndex((c) => c.id === activeConv.id);
+          if (idx === -1) return prev;
+          const next = [...prev];
+          const current = next[idx];
+          const updated: Conversation = {
+            ...current,
+            lastMessage: { body: last.body, createdAt: last.createdAt, senderId: last.senderId },
+          };
+          next.splice(idx, 1);
+          return [updated, ...next];
+        });
+        setConversationLastRead(activeConv.id, Date.now());
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to send message.';
       toast.error(msg);
@@ -423,7 +539,16 @@ export default function Messages() {
                 <p className="text-muted-foreground">No conversations yet.</p>
               </div>
             ) : (
-              conversations.map((c) => (
+              conversations.map((c) => {
+                const unread = isConversationUnread({
+                  conversationId: c.id,
+                  lastMessageAt: c.lastMessage?.createdAt,
+                  lastMessageSenderId: c.lastMessage?.senderId,
+                  meId: user?.id,
+                });
+                const ts = c.lastMessage?.createdAt ? format(new Date(c.lastMessage.createdAt), 'h:mm a') : '';
+
+                return (
                 <button
                   key={c.id}
                   onClick={() => void openConversation(c)}
@@ -439,8 +564,13 @@ export default function Messages() {
                       {c.lastMessage?.body ?? 'Tap to open'}
                     </p>
                   </div>
+                  <div className="shrink-0 flex flex-col items-end gap-1">
+                    {ts ? <span className="text-xs text-muted-foreground">{ts}</span> : null}
+                    {unread ? <span className="w-2 h-2 rounded-full bg-red-500" /> : null}
+                  </div>
                 </button>
-              ))
+                );
+              })
             )}
           </TabsContent>
 

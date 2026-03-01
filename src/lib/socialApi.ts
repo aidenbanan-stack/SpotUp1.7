@@ -1,12 +1,30 @@
 import { supabase } from '@/lib/supabaseClient';
 import { fetchProfilesByIds } from '@/lib/profileApi';
 import type { User } from '@/types';
+import { createNotification } from '@/lib/notificationsApi';
 
 export async function sendFriendRequest(toUserId: string): Promise<void> {
   // Prefer RPC (uses auth.uid() on the server). Fall back to direct insert for projects
   // that haven't installed the SQL functions yet.
   const { error: rpcErr } = await supabase.rpc('send_friend_request', { p_to_user: toUserId });
-  if (!rpcErr) return;
+  if (!rpcErr) {
+    // Best-effort notify recipient.
+    try {
+      const { data } = await supabase.auth.getUser();
+      const me = data.user;
+      if (me) {
+        await createNotification({
+          userId: toUserId,
+          type: 'friend_request',
+          relatedUserId: me.id,
+          message: 'New friend request',
+        });
+      }
+    } catch {
+      // ignore
+    }
+    return;
+  }
 
   const { data: auth, error: authErr } = await supabase.auth.getUser();
   if (authErr) throw authErr;
@@ -30,6 +48,18 @@ export async function sendFriendRequest(toUserId: string): Promise<void> {
     const msg = (error as any)?.message ?? '';
     if (msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('unique')) return;
     throw error;
+  }
+
+  // Best-effort notify recipient.
+  try {
+    await createNotification({
+      userId: toUserId,
+      type: 'friend_request',
+      relatedUserId: me.id,
+      message: 'New friend request',
+    });
+  } catch {
+    // ignore
   }
 }
 

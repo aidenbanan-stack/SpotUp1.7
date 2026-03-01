@@ -13,6 +13,8 @@ import { GameCard } from '@/components/GameCard';
 import { XPRoadDialog } from '@/components/XPRoadDialog';
 import { Bell, MapPin, Plus, User, History, MessageCircle, Users2 } from 'lucide-react';
 import { SPORTS, Sport } from '@/types';
+import { fetchMyConversations } from '@/lib/messagesApi';
+import { isConversationUnread } from '@/lib/messageReadState';
 
 
 import { getBrowserLocation, milesBetween, type LatLng } from '@/lib/geo';
@@ -23,6 +25,8 @@ type SportFilter = Sport | 'all';
 export default function Home() {
   const navigate = useNavigate();
   const { user, games, unreadCount, gamesLoading, gamesError, refreshGames } = useApp();
+
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
 
   const [xpOpen, setXpOpen] = useState(false);
   const [selectedSport, setSelectedSport] = useState<SportFilter>('all');
@@ -43,6 +47,32 @@ export default function Home() {
       mounted = false;
     };
   }, []);
+
+  // Best-effort unread indicator for the messages icon.
+  useEffect(() => {
+    let mounted = true;
+    if (!user) {
+      setHasUnreadMessages(false);
+      return;
+    }
+    void fetchMyConversations()
+      .then((convs) => {
+        if (!mounted) return;
+        const anyUnread = convs.some((c) =>
+          isConversationUnread({
+            conversationId: c.id,
+            lastMessageAt: c.lastMessage?.createdAt,
+            lastMessageSenderId: c.lastMessage?.senderId,
+            meId: user.id,
+          })
+        );
+        setHasUnreadMessages(anyUnread);
+      })
+      .catch(() => undefined);
+    return () => {
+      mounted = false;
+    };
+  }, [user?.id]);
 const filteredGames = selectedSport === 'all'
     ? games
     : games.filter(g => g.sport === selectedSport);
@@ -107,10 +137,13 @@ const filteredGames = selectedSport === 'all'
 
             <button
               onClick={() => navigate('/messages')}
-              className="p-2 rounded-xl bg-secondary/60 hover:bg-secondary transition-colors"
+              className="p-2 rounded-xl bg-secondary/60 hover:bg-secondary transition-colors relative"
               aria-label="Messages"
             >
               <MessageCircle className="w-5 h-5 text-foreground" />
+              {hasUnreadMessages && (
+                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />
+              )}
             </button>
 
             <button

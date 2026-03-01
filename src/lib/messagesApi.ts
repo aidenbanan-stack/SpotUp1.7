@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient';
+import { createNotification } from '@/lib/notificationsApi';
 
 export type Conversation = {
   id: string;
@@ -6,7 +7,7 @@ export type Conversation = {
   otherUserId: string;
   otherUsername: string;
   otherPhotoUrl: string;
-  lastMessage?: { body: string; createdAt: Date };
+  lastMessage?: { body: string; createdAt: Date; senderId?: string };
 };
 
 export type Message = {
@@ -162,7 +163,20 @@ export async function sendMessageRequest(toUserId: string, initialMessage: strin
     initial_message: initialMessage ?? '',
   });
 
-  if (!error) return;
+  if (!error) {
+    // Best-effort notification.
+    try {
+      await createNotification({
+        userId: toUserId,
+        type: 'message_request',
+        relatedUserId: me.id,
+        message: 'New message request',
+      });
+    } catch {
+      // ignore
+    }
+    return;
+  }
 
   const msg = (error as any)?.message ?? '';
   const code = (error as any)?.code ?? '';
@@ -268,7 +282,7 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
 
   const { data: msgs, error: msgErr } = await supabase
     .from('messages')
-    .select('conversation_id,body,created_at')
+    .select('conversation_id,body,created_at,sender_id')
     .in('conversation_id', conversationIds)
     .order('created_at', { ascending: false })
     .limit(200);
@@ -291,7 +305,9 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
       otherUserId: otherId,
       otherUsername: p.username || 'player',
       otherPhotoUrl: p.profile_photo_url || cleanPhoto(''),
-      lastMessage: last ? { body: last.body ?? '', createdAt: new Date(last.created_at) } : undefined,
+      lastMessage: last
+        ? { body: last.body ?? '', createdAt: new Date(last.created_at), senderId: last.sender_id ?? undefined }
+        : undefined,
     };
   });
 }
@@ -345,6 +361,28 @@ export async function sendGameInvite(conversationId: string, gameId: string, not
   });
 
   if (error) throw error;
+}
+
+/**
+ * Convenience: invite a user to a game (creates conversation if needed), and notifies them.
+ */
+export async function sendGameInviteToUser(otherUserId: string, gameId: string, note?: string): Promise<void> {
+  const me = await requireMe();
+  const conversationId = await getOrCreateConversationWithUser(otherUserId);
+  await sendGameInvite(conversationId, gameId, note);
+
+  // Best-effort notification.
+  try {
+    await createNotification({
+      userId: otherUserId,
+      type: 'game_invite',
+      relatedUserId: me.id,
+      relatedGameId: gameId,
+      message: 'New game invite',
+    });
+  } catch {
+    // ignore
+  }
 }
 
 function normalizePair(a: string, b: string): { user1: string; user2: string } {

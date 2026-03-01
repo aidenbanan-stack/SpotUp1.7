@@ -102,3 +102,31 @@ export async function clearMyReadNotifications(): Promise<void> {
 
   if (error) throw error;
 }
+
+/**
+ * Create a notification for another user.
+ *
+ * Requires INSERT policy that allows authenticated users to insert notifications.
+ * Recommended RLS: allow insert when auth.uid() is not null.
+ */
+export async function createNotification(input: {
+  userId: string;
+  type: Notification['type'];
+  message: string;
+  relatedGameId?: string;
+  relatedUserId?: string;
+  relatedTournamentId?: string;
+}): Promise<void> {
+  const row = {
+    user_id: input.userId,
+    type: input.type,
+    related_game_id: input.relatedGameId ?? null,
+    related_user_id: input.relatedUserId ?? null,
+    related_tournament_id: input.relatedTournamentId ?? null,
+    message: input.message,
+    read: false,
+  };
+
+  const { error } = await supabase.from('notifications').insert(row);
+  if (error) throw error;
+}

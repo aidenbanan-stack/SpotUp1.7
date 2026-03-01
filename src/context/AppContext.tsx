@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, ReactNode } fr
 import type { User, Sport, Game, Notification } from '@/types';
 import { fetchGames } from '@/lib/gamesApi';
 import { fetchMyNotifications } from '@/lib/notificationsApi';
+import { supabase } from '@/lib/supabaseClient';
 
 interface AppContextType {
   user: User | null;
@@ -69,6 +70,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void refreshNotifications();
+  }, [user?.id]);
+
+  // Realtime notifications (best-effort).
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`notifications-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+        () => {
+          void refreshNotifications();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   const value: AppContextType = {

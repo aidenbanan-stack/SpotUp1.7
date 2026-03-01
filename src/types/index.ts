@@ -118,7 +118,17 @@ export interface Game {
 export interface Notification {
   id: string;
   userId: string;
-  type: 'friend_request' | 'game_invite' | 'game_approved' | 'game_denied' | 'game_reminder' | 'game_cancelled' | 'tournament_invite' | 'tournament_start';
+  type:
+    | 'friend_request'
+    | 'message_request'
+    | 'game_invite'
+    | 'new_message'
+    | 'game_approved'
+    | 'game_denied'
+    | 'game_reminder'
+    | 'game_cancelled'
+    | 'tournament_invite'
+    | 'tournament_start';
   relatedGameId?: string;
   relatedUserId?: string;
   relatedTournamentId?: string;

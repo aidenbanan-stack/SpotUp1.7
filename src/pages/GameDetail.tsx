@@ -7,9 +7,14 @@ import { PlayerLevelBadge } from '@/components/PlayerLevelBadge';
 import { ArrowLeft, Calendar, Clock, Lock, MapPin, Share2, Users } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import { approveJoinRequest, deleteGame, joinGame, leaveGame, rejectJoinRequest, setGameStatus } from '@/lib/gamesApi';
 import { fetchProfilesByIds, getOrCreateMyProfile } from '@/lib/profileApi';
 import { awardXp } from '@/lib/xpApi';
+import { fetchMyFriends } from '@/lib/socialApi';
+import { sendGameInviteToUser } from '@/lib/messagesApi';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 
 export default function GameDetail() {
   const { id } = useParams();
@@ -18,6 +23,12 @@ export default function GameDetail() {
 
   const [pendingProfiles, setPendingProfiles] = useState<any[]>([]);
   const [pendingBusy, setPendingBusy] = useState<string | null>(null);
+
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [friends, setFriends] = useState<any[]>([]);
+  const [inviteNote, setInviteNote] = useState('');
+  const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
 
   const game = games.find((g) => g.id === id);
 
@@ -69,41 +80,32 @@ export default function GameDetail() {
 
   const canViewLive = (isHost || isJoined) && isLive;
 
+
+
   const openProfile = (userId: string) => {
     navigate(`/profile/${userId}`);
   };
 
+  // Load friends lazily when opening the invite dialog.
   useEffect(() => {
     let mounted = true;
-
-    const loadPending = async () => {
-      if (!game || !isHost) {
-        setPendingProfiles([]);
-        return;
-      }
-      const ids = Array.from(new Set(game.pendingRequestIds ?? [])).filter(Boolean);
-      if (ids.length === 0) {
-        setPendingProfiles([]);
-        return;
-      }
-      setPendingLoading(true);
+    const loadFriends = async () => {
+      if (!inviteOpen) return;
+      if (!user) return;
       try {
-        const profs = await fetchProfilesByIds(ids);
+        setFriendsLoading(true);
+        const f = await fetchMyFriends().catch(() => []);
         if (!mounted) return;
-        setPendingProfiles(profs);
-      } catch {
-        if (!mounted) return;
-        setPendingProfiles([]);
+        setFriends(f);
       } finally {
-        if (mounted) setPendingLoading(false);
+        if (mounted) setFriendsLoading(false);
       }
     };
-
-    void loadPending();
+    void loadFriends();
     return () => {
       mounted = false;
     };
-  }, [game.id, isHost, (game.pendingRequestIds ?? []).join(',')]);
+  }, [inviteOpen, user?.id]);
 
   const handleApproveRequest = async (targetUserId: string) => {
     try {
@@ -456,6 +458,97 @@ export default function GameDetail() {
               <Button variant="hero" size="xl" className="w-full" onClick={() => navigate(`/game/${game.id}/live`)}>
                 View Live Game
               </Button>
+            )}
+
+            {(isHost || isJoined) && user && (
+              <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="secondary" className="w-full">
+                    Invite friends
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Invite friends to this game</DialogTitle>
+                  </DialogHeader>
+
+                  <div className="space-y-3">
+                    <Input
+                      value={inviteNote}
+                      onChange={(e) => setInviteNote(e.target.value)}
+                      placeholder="Optional note"
+                    />
+
+                    {friendsLoading ? (
+                      <div className="text-sm text-muted-foreground">Loading friends...</div>
+                    ) : friends.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No friends yet.</div>
+                    ) : (
+                      <div className="max-h-[260px] overflow-auto space-y-2">
+                        {friends.map((f: any) => {
+                          const selected = selectedFriendIds.includes(f.id);
+                          return (
+                            <button
+                              key={f.id}
+                              type="button"
+                              onClick={() =>
+                                setSelectedFriendIds((prev) =>
+                                  prev.includes(f.id) ? prev.filter((x) => x !== f.id) : [...prev, f.id]
+                                )
+                              }
+                              className={cn(
+                                'w-full flex items-center gap-3 p-2 rounded-xl border transition',
+                                selected ? 'border-primary bg-primary/10' : 'border-border/50 bg-secondary/40'
+                              )}
+                            >
+                              <img
+                                src={f.profilePhotoUrl}
+                                alt={f.username}
+                                className="w-9 h-9 rounded-full object-cover"
+                              />
+                              <div className="flex-1 text-left">
+                                <div className="font-semibold leading-tight">{f.username}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {game.isPrivate && !isHost
+                                    ? 'They can request to join from your invite'
+                                    : 'Invite to join'}
+                                </div>
+                              </div>
+                              <div
+                                className={cn(
+                                  'w-4 h-4 rounded border',
+                                  selected ? 'bg-primary border-primary' : 'border-border/50'
+                                )}
+                              />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <DialogFooter>
+                    <Button
+                      disabled={selectedFriendIds.length === 0}
+                      onClick={async () => {
+                        try {
+                          const ids = [...selectedFriendIds];
+                          await Promise.all(ids.map((fid) => sendGameInviteToUser(fid, game.id, inviteNote)));
+                          toast.success('Invites sent.');
+                          setInviteOpen(false);
+                          setInviteNote('');
+                          setSelectedFriendIds([]);
+                        } catch (err) {
+                          const msg = err instanceof Error ? err.message : 'Failed to send invites.';
+                          toast.error(msg);
+                        }
+                      }}
+                    >
+                      Send invites
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             )}
 
             {isHost ? (
