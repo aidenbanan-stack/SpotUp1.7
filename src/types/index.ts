@@ -122,6 +122,7 @@ export interface Notification {
     | 'friend_request'
     | 'message_request'
     | 'game_invite'
+    | 'join_request'
     | 'new_message'
     | 'game_approved'
     | 'game_denied'

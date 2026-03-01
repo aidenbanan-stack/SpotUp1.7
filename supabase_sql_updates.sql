@@ -349,3 +349,86 @@ delete from public.conversations where id in (select id from dupe_ids);
 
 -- OPTIONAL NUCLEAR RESET (dev only): clears all messaging.
 -- truncate table public.messages, public.conversation_members, public.conversations, public.message_requests;
+
+
+-- -----------------------------------------------------------------------------
+-- NOTIFICATIONS: RLS + policies (required for app Notifications + realtime)
+-- -----------------------------------------------------------------------------
+alter table if exists public.notifications enable row level security;
+
+-- Read only your own notifications
+create policy if not exists "notifications_select_own"
+on public.notifications
+for select
+using (auth.uid() = user_id);
+
+-- Allow authenticated users to create notifications (recommended).
+-- If you want tighter control, replace this with SECURITY DEFINER RPCs.
+create policy if not exists "notifications_insert_authenticated"
+on public.notifications
+for insert
+to authenticated
+with check (auth.uid() is not null);
+
+-- Allow users to mark their own notifications as read / delete their own notifications
+create policy if not exists "notifications_update_own"
+on public.notifications
+for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy if not exists "notifications_delete_own"
+on public.notifications
+for delete
+using (auth.uid() = user_id);
+
+-- -----------------------------------------------------------------------------
+-- GAME INVITES: accept private invite when inviter is host
+-- -----------------------------------------------------------------------------
+create or replace function public.accept_game_invite(p_game_id uuid, p_inviter_user_id uuid)
+returns public.games
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_me uuid := auth.uid();
+  v_game public.games;
+  v_players uuid[];
+  v_pending uuid[];
+begin
+  if v_me is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  select * into v_game from public.games where id = p_game_id;
+  if v_game is null then
+    raise exception 'Game not found';
+  end if;
+
+  -- If inviter is the host, allow direct join even for private games.
+  if v_game.host_id = p_inviter_user_id then
+    v_players := coalesce(v_game.player_ids, '{}'::uuid[]);
+    if not (v_me = any(v_players)) then
+      v_players := array_append(v_players, v_me);
+    end if;
+
+    v_pending := coalesce(v_game.pending_request_ids, '{}'::uuid[]);
+    -- Remove from pending if present
+    v_pending := array_remove(v_pending, v_me);
+
+    update public.games
+      set player_ids = v_players,
+          pending_request_ids = v_pending
+      where id = p_game_id
+      returning * into v_game;
+
+    return v_game;
+  end if;
+
+  -- Otherwise behave like a normal join (public joins, private requests)
+  return (select * from public.join_or_request_game(p_game_id));
+end;
+$$;
+
+grant execute on function public.accept_game_invite(uuid, uuid) to authenticated;

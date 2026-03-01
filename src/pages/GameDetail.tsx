@@ -7,12 +7,12 @@ import { PlayerLevelBadge } from '@/components/PlayerLevelBadge';
 import { ArrowLeft, Calendar, Clock, Lock, MapPin, Share2, Users } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { createNotification } from '@/lib/notificationsApi';
 import { cn } from '@/lib/utils';
 import { approveJoinRequest, deleteGame, joinGame, leaveGame, rejectJoinRequest, setGameStatus } from '@/lib/gamesApi';
 import { fetchProfilesByIds, getOrCreateMyProfile } from '@/lib/profileApi';
 import { awardXp } from '@/lib/xpApi';
 import { fetchMyFriends } from '@/lib/socialApi';
-import { sendGameInviteToUser } from '@/lib/messagesApi';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 
@@ -532,8 +532,20 @@ export default function GameDetail() {
                       disabled={selectedFriendIds.length === 0}
                       onClick={async () => {
                         try {
+                          if (!user) { toast.error('Profile still loading. Try again.'); return; }
                           const ids = [...selectedFriendIds];
-                          await Promise.all(ids.map((fid) => sendGameInviteToUser(fid, game.id, inviteNote)));
+                          await Promise.all(ids.map(async (fid) => {
+                            const base = `${user?.username ?? 'Someone'} invited you to join ${game.title}`;
+                            const note = (inviteNote ?? '').trim();
+                            const msg = note ? `${base}: ${note}` : base;
+                            await createNotification({
+                              userId: fid,
+                              type: 'game_invite',
+                              relatedUserId: user!.id,
+                              relatedGameId: game.id,
+                              message: msg,
+                            });
+                          }));
                           toast.success('Invites sent.');
                           setInviteOpen(false);
                           setInviteNote('');

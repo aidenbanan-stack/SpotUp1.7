@@ -6,8 +6,10 @@ import { ArrowLeft, Bell, Calendar, Check, MoreVertical, UserPlus, X } from 'luc
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { acceptFriendRequest, rejectFriendRequest } from '@/lib/socialApi';
+import { acceptGameInvite, approveJoinRequest, rejectJoinRequest } from '@/lib/gamesApi';
 import { fetchProfileById } from '@/lib/profileApi';
 import { toast } from 'sonner';
+import { createNotification } from '@/lib/notificationsApi';
 import { clearMyNotifications, clearMyReadNotifications, deleteNotification, markNotificationRead } from '@/lib/notificationsApi';
 import {
   DropdownMenu,
@@ -19,15 +21,15 @@ import {
 
 export default function Notifications() {
   const navigate = useNavigate();
-  const { notifications, setNotifications } = useApp();
+  const { user, notifications, setNotifications } = useApp();
 
   const [nameByUserId, setNameByUserId] = useState<Record<string, string>>({});
-  const friendRequestUserIds = useMemo(() => {
+  const relatedUserIdsNeedingNames = useMemo(() => {
     return Array.from(
       new Set(
         notifications
-          .filter(n => n.type === 'friend_request' && n.relatedUserId)
-          .map(n => n.relatedUserId as string)
+          .map(n => n.relatedUserId)
+          .filter(Boolean) as string[]
       )
     );
   }, [notifications]);
@@ -36,7 +38,7 @@ export default function Notifications() {
     let mounted = true;
 
     const loadNames = async () => {
-      const missing = friendRequestUserIds.filter(uid => !nameByUserId[uid]);
+      const missing = relatedUserIdsNeedingNames.filter(uid => !nameByUserId[uid]);
       if (!missing.length) return;
 
       const entries: Record<string, string> = {};
@@ -56,7 +58,7 @@ export default function Notifications() {
     return () => {
       mounted = false;
     };
-  }, [friendRequestUserIds, nameByUserId]);
+  }, [relatedUserIdsNeedingNames, nameByUserId]);
 
   const markAsReadLocal = (id: string) => {
     setNotifications(notifications.map(n => (n.id === id ? { ...n, read: true } : n)));
@@ -100,6 +102,8 @@ export default function Notifications() {
         return <Bell className="w-5 h-5 text-primary" />;
       case 'game_invite':
         return <Calendar className="w-5 h-5 text-green-500" />;
+      case 'join_request':
+        return <UserPlus className="w-5 h-5 text-blue-500" />;
       case 'game_approved':
         return <Check className="w-5 h-5 text-green-500" />;
       case 'game_denied':
@@ -140,6 +144,103 @@ export default function Notifications() {
   }
 };
 
+
+const handleAcceptGameInvite = async (notificationId: string, inviterUserId: string, gameId: string) => {
+  try {
+    const updated = await acceptGameInvite(gameId, inviterUserId);
+
+    // If accepting an invite resulted in a private join request (not joined yet), notify host (best-effort).
+    if (updated.isPrivate && user && !(updated.playerIds ?? []).includes(user.id) && (updated.pendingRequestIds ?? []).includes(user.id)) {
+      // joinGame() already notifies host for pending requests, but keep this as a safeguard.
+      try {
+        if (updated.hostId) {
+          await createNotification({
+            userId: updated.hostId,
+            type: 'join_request',
+            relatedUserId: user.id,
+            relatedGameId: updated.id,
+            message: 'New join request',
+          });
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    await deleteNotification(notificationId);
+    setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+
+    toast.success(updated.isPrivate ? 'Invite accepted.' : 'Joined the game.');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to accept invite.';
+    toast.error(msg);
+  }
+};
+
+const handleDecline = async (notificationId: string) => {
+  try {
+    await deleteNotification(notificationId);
+    setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+    toast.success('Declined.');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to decline.';
+    toast.error(msg);
+  }
+};
+
+const handleApproveJoinRequestFromNotif = async (notificationId: string, requesterUserId: string, gameId: string) => {
+  try {
+    const updated = await approveJoinRequest(gameId, requesterUserId);
+
+    await deleteNotification(notificationId);
+    setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+
+    toast.success('Approved join request.');
+
+    // Best-effort notify requester
+    try {
+      await createNotification({
+        userId: requesterUserId,
+        type: 'game_approved',
+        relatedUserId: updated.hostId,
+        relatedGameId: updated.id,
+        message: 'Your request to join was approved',
+      });
+    } catch {
+      // ignore
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to approve request.';
+    toast.error(msg);
+  }
+};
+
+const handleRejectJoinRequestFromNotif = async (notificationId: string, requesterUserId: string, gameId: string) => {
+  try {
+    const updated = await rejectJoinRequest(gameId, requesterUserId);
+
+    await deleteNotification(notificationId);
+    setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+
+    toast.success('Rejected join request.');
+
+    // Best-effort notify requester
+    try {
+      await createNotification({
+        userId: requesterUserId,
+        type: 'game_denied',
+        relatedUserId: updated.hostId,
+        relatedGameId: updated.id,
+        message: 'Your request to join was denied',
+      });
+    } catch {
+      // ignore
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to reject request.';
+    toast.error(msg);
+  }
+};
   return (
     <div className="min-h-screen bg-background pb-24 safe-top">
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/50">
@@ -188,10 +289,7 @@ export default function Notifications() {
               const fromId = notification.relatedUserId;
               const fromName = fromId ? (nameByUserId[fromId] || 'Someone') : 'Someone';
 
-              const subtitle =
-                notification.type === 'friend_request'
-                  ? `From ${fromName}`
-                  : undefined;
+              const subtitle = fromId ? `From ${fromName}` : undefined;
 
               return (
                 <div
@@ -202,7 +300,7 @@ export default function Notifications() {
                   )}
                   onClick={() => {
                     // Friend requests should keep their action buttons visible until accepted/rejected.
-                    if (notification.type !== 'friend_request') {
+                    if (notification.type !== 'friend_request' && notification.type !== 'game_invite' && notification.type !== 'join_request') {
                       markAsReadLocal(notification.id);
                     }
 
@@ -252,6 +350,56 @@ export default function Notifications() {
                           </Button>
                         </div>
                       )}
+                      {notification.type === 'game_invite' && fromId && notification.relatedGameId && (
+                        <div className="mt-3 flex gap-2">
+                          <Button
+                            variant="hero"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleAcceptGameInvite(notification.id, fromId, notification.relatedGameId!);
+                            }}
+                          >
+                            Accept
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleDecline(notification.id);
+                            }}
+                          >
+                            Decline
+                          </Button>
+                        </div>
+                      )}
+
+                      {notification.type === 'join_request' && fromId && notification.relatedGameId && (
+                        <div className="mt-3 flex gap-2">
+                          <Button
+                            variant="hero"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleApproveJoinRequestFromNotif(notification.id, fromId, notification.relatedGameId!);
+                            }}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleRejectJoinRequestFromNotif(notification.id, fromId, notification.relatedGameId!);
+                            }}
+                          >
+                            Deny
+                          </Button>
+                        </div>
+                      )}
+
                     </div>
                   </div>
                 </div>

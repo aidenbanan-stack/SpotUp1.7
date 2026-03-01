@@ -1,6 +1,7 @@
 import type { Game, SkillLevel, Sport } from '@/types';
 import { supabase } from '@/lib/supabaseClient';
 import { fetchProfileById, fetchProfilesByIds } from '@/lib/profileApi';
+import { createNotification } from '@/lib/notificationsApi';
 
 // DB shape (public.games)
 export type GameRow = {
@@ -101,6 +102,30 @@ export async function fetchGameById(gameId: string): Promise<Game> {
   return await hydrateGame(base);
 }
 
+
+/**
+ * Accept a game invite.
+ * - Public games: joins using join_or_request_game.
+ * - Private games: if inviter is the host, joins directly via RPC accept_game_invite (requires SQL).
+ *   Otherwise, falls back to join_or_request_game (creates a request).
+ */
+export async function acceptGameInvite(gameId: string, inviterUserId: string): Promise<Game> {
+  // First try special RPC for host-invites (works for private games).
+  const { data: rpcData, error: rpcErr } = await supabase
+    .rpc('accept_game_invite', { p_game_id: gameId, p_inviter_user_id: inviterUserId })
+    .single();
+
+  if (!rpcErr && rpcData) {
+    return await hydrateGame(rowToGame(rpcData as GameRow));
+  }
+
+  // Fallback: behave like a normal join (public joins, private becomes a request).
+  const { data: auth } = await supabase.auth.getUser();
+  const me = auth.user;
+  const meId = me?.id ?? '';
+  return await joinGame(gameId, meId, true);
+}
+
 export type CreateGameInput = Omit<
   Game,
   'id' | 'createdAt' | 'host' | 'players' | 'postGameVotes' | 'completedAt'
@@ -179,10 +204,30 @@ export async function deleteGame(gameId: string): Promise<void> {
  * Secure join/leave/check-in use RPCs that enforce auth.uid() on the server.
  */
 
-export async function joinGame(gameId: string, _userId: string, _isPrivate: boolean): Promise<Game> {
+export async function joinGame(gameId: string, userId: string, _isPrivate: boolean): Promise<Game> {
   const { data, error } = await supabase.rpc('join_or_request_game', { p_game_id: gameId }).single();
   if (error) throw error;
-  return await hydrateGame(rowToGame(data as GameRow));
+
+  const updated = await hydrateGame(rowToGame(data as GameRow));
+
+  // If this was a private game request (not an auto-join), best-effort notify the host.
+  try {
+    const isPending = (updated.pendingRequestIds ?? []).includes(userId);
+    const isJoined = (updated.playerIds ?? []).includes(userId);
+    if (updated.isPrivate && isPending && !isJoined && updated.hostId && updated.hostId !== userId) {
+      await createNotification({
+        userId: updated.hostId,
+        type: 'join_request',
+        relatedUserId: userId,
+        relatedGameId: updated.id,
+        message: 'New join request',
+      });
+    }
+  } catch {
+    // ignore
+  }
+
+  return updated;
 }
 
 /**
