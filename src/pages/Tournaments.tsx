@@ -4,7 +4,7 @@ import { ArrowLeft, Plus, Trophy, Calendar, MapPin, Lock } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { SPORTS } from '@/data/mockData';
+import { SPORTS } from '@/types';
 import { fetchTournaments, type TournamentRow } from '@/lib/tournamentsApi';
 
 function formatWhen(iso: string): string {
