@@ -1,20 +1,30 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Calendar, MapPin, Lock, Trophy, Users } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SPORTS } from '@/types';
 import {
   fetchTournamentById,
-  isUserRegistered,
+  isUserOrSquadRegistered,
   registerForTournament,
+  registerSquadForTournament,
   type TournamentRow,
 } from '@/lib/tournamentsApi';
+import { fetchMySquads, type SquadWithMeta } from '@/lib/squadsApi';
+import { toast } from 'sonner';
 
 function formatWhen(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return d.toLocaleString([], {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 export default function TournamentDetail() {
@@ -26,6 +36,18 @@ export default function TournamentDetail() {
   const [tournament, setTournament] = useState<TournamentRow | null>(null);
   const [registered, setRegistered] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const [pickOpen, setPickOpen] = useState(false);
+  const [mySquads, setMySquads] = useState<SquadWithMeta[]>([]);
+  const [loadingSquads, setLoadingSquads] = useState(false);
+
+  const canJoinAsSquad = useMemo(() => {
+    return tournament?.join_mode === 'squad' || tournament?.join_mode === 'either';
+  }, [tournament?.join_mode]);
+
+  const canJoinAsSolo = useMemo(() => {
+    return tournament?.join_mode === 'solo' || tournament?.join_mode === 'either';
+  }, [tournament?.join_mode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,8 +61,10 @@ export default function TournamentDetail() {
         setTournament(t);
 
         if (user?.id) {
-          const r = await isUserRegistered({ tournamentId: id, userId: user.id });
+          const r = await isUserOrSquadRegistered({ tournamentId: id, userId: user.id });
           if (!cancelled) setRegistered(r);
+        } else {
+          if (!cancelled) setRegistered(false);
         }
       } catch (e) {
         console.error(e);
@@ -56,18 +80,84 @@ export default function TournamentDetail() {
     };
   }, [id, user?.id]);
 
-  async function onRegister() {
-    if (!id || !user?.id) return;
+  async function loadSquadsIfNeeded() {
+    if (!user?.id) return;
+    if (mySquads.length > 0) return;
+
+    try {
+      setLoadingSquads(true);
+      const squads = await fetchMySquads(user.id);
+      setMySquads(squads);
+    } catch (e) {
+      console.error(e);
+      setMySquads([]);
+    } finally {
+      setLoadingSquads(false);
+    }
+  }
+
+  async function onJoinSolo() {
+    if (!id) return;
+    if (!user?.id) {
+      toast.error('Please sign in first');
+      return;
+    }
     try {
       setBusy(true);
       await registerForTournament({ tournamentId: id, userId: user.id });
       setRegistered(true);
-    } catch (e) {
+      toast.success('Joined tournament!');
+    } catch (e: any) {
       console.error(e);
-      alert('Could not register. Check Supabase tables / RLS.');
+      toast.error(e?.message ? `Could not join: ${e.message}` : 'Could not join. Check Supabase tables / RLS.');
     } finally {
       setBusy(false);
     }
+  }
+
+  async function onJoinSquad(squadId: string) {
+    if (!id) return;
+    if (!user?.id) {
+      toast.error('Please sign in first');
+      return;
+    }
+    try {
+      setBusy(true);
+      await registerSquadForTournament({ tournamentId: id, squadId });
+      setRegistered(true);
+      setPickOpen(false);
+      toast.success('Squad joined tournament!');
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message ? `Could not join: ${e.message}` : 'Could not join. Check Supabase tables / RLS.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onJoinPressed() {
+    if (!tournament) return;
+    if (!user?.id) {
+      toast.error('Please sign in first');
+      return;
+    }
+
+    // If only solo
+    if (tournament.join_mode === 'solo') {
+      await onJoinSolo();
+      return;
+    }
+
+    // If only squad
+    if (tournament.join_mode === 'squad') {
+      await loadSquadsIfNeeded();
+      setPickOpen(true);
+      return;
+    }
+
+    // Either: open picker with both options
+    await loadSquadsIfNeeded();
+    setPickOpen(true);
   }
 
   return (
@@ -111,57 +201,107 @@ export default function TournamentDetail() {
                       <Calendar className="w-4 h-4" />
                       <span>{formatWhen(tournament.starts_at)}</span>
                     </div>
+
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <MapPin className="w-4 h-4" />
-                      <span>{(tournament.location as any)?.areaName ?? 'Location TBD'}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Trophy className="w-4 h-4" />
                       <span>
-                        {tournament.format} · {tournament.series_type} · {tournament.team_count} teams · {tournament.points_style}
+                        {(tournament.location as any)?.areaName ?? (tournament.location as any)?.name ?? 'Location TBD'}
                       </span>
                     </div>
+
                     {tournament.is_private ? (
                       <div className="flex items-center gap-2 text-muted-foreground">
                         <Lock className="w-4 h-4" />
-                        <span>Private</span>
+                        <span>Private tournament</span>
+                      </div>
+                    ) : null}
+
+                    {tournament.join_mode !== 'solo' ? (
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Users className="w-4 h-4" />
+                        <span>
+                          {tournament.join_mode === 'squad' ? 'Squad tournament' : 'Join as a squad or as yourself'}
+                        </span>
                       </div>
                     ) : null}
                   </div>
                 </div>
               </div>
-
-              {tournament.notes ? (
-                <div className="mt-4 pt-4 border-t border-border/50">
-                  <p className="text-sm text-muted-foreground whitespace-pre-line">{tournament.notes}</p>
-                </div>
-              ) : null}
             </div>
 
             <div className="glass-card p-5">
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4" />
-                <p className="font-semibold">Registration</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-semibold">Teams</p>
+                  <p className="text-sm text-muted-foreground">{tournament.team_count} total</p>
+                </div>
+
+                <Trophy className="w-6 h-6 text-primary" />
               </div>
 
-              <p className="text-sm text-muted-foreground mt-2">
-                Registering reserves your spot for updates. Brackets and teams will appear here once added.
-              </p>
+              {tournament.notes ? (
+                <div className="mt-4 text-sm text-muted-foreground whitespace-pre-wrap">{tournament.notes}</div>
+              ) : null}
 
-              {!user?.id ? (
-                <Button className="w-full mt-4 h-12" onClick={() => navigate('/')} disabled>
-                  Sign in to register
-                </Button>
-              ) : registered ? (
-                <Button className="w-full mt-4 h-12" variant="secondary" disabled>
-                  Registered ✓
-                </Button>
-              ) : (
-                <Button className="w-full mt-4 h-12" onClick={onRegister} disabled={busy}>
-                  Register
-                </Button>
-              )}
+              <div className="mt-5">
+                {registered ? (
+                  <Button className="w-full" disabled>
+                    <Users className="w-4 h-4 mr-2" />
+                    You&apos;re registered
+                  </Button>
+                ) : (
+                  <Button className="w-full" onClick={onJoinPressed} disabled={busy}>
+                    <Users className="w-4 h-4 mr-2" />
+                    {busy ? 'Joining...' : 'Join tournament'}
+                  </Button>
+                )}
+              </div>
             </div>
+
+            <Dialog open={pickOpen} onOpenChange={setPickOpen}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Join tournament</DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-3">
+                  {canJoinAsSolo ? (
+                    <Button className="w-full" variant="secondary" onClick={onJoinSolo} disabled={busy}>
+                      Join as me
+                    </Button>
+                  ) : null}
+
+                  {canJoinAsSquad ? (
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">Join with a squad</p>
+
+                      {loadingSquads ? (
+                        <div className="text-sm text-muted-foreground">Loading squads...</div>
+                      ) : mySquads.length === 0 ? (
+                        <div className="glass-card p-3 text-sm text-muted-foreground">
+                          You don&apos;t have any squads yet. Create or join a squad first.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {mySquads.map((s) => (
+                            <Button
+                              key={s.id}
+                              className="w-full justify-between"
+                              variant="outline"
+                              onClick={() => onJoinSquad(s.id)}
+                              disabled={busy}
+                            >
+                              <span className="truncate">{s.name}</span>
+                              <span className="text-xs text-muted-foreground">{s.member_count} members</span>
+                            </Button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              </DialogContent>
+            </Dialog>
           </>
         )}
       </main>

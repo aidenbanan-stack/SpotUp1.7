@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
-import { createTournament } from '@/lib/tournamentsApi';
+import { createTournament, type TournamentJoinMode } from '@/lib/tournamentsApi';
 
 import {
   TournamentFormat,
@@ -11,9 +11,8 @@ import {
   TOURNAMENT_FORMATS,
   TEAM_COUNTS,
   Sport,
-  canCreateTournament,
 } from '@/types';
-import { ArrowLeft, Trophy, MapPin, Calendar, Target, Info, Check, Lock } from 'lucide-react';
+import { ArrowLeft, Trophy, MapPin, Calendar, Target, Info, Check, Lock, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,17 +35,6 @@ export default function CreateTournament() {
   const navigate = useNavigate();
   const { user } = useApp();
 
-  // Check if user can create tournaments
-  const canCreate = user
-    ? canCreateTournament(user)
-    : { allowed: false, requirements: { reliability: false, hostRating: false, gamesHosted: false } };
-
-  useEffect(() => {
-    if (!canCreate.allowed) {
-      navigate('/tournaments');
-    }
-  }, [canCreate.allowed, navigate]);
-
   const [name, setName] = useState('');
   const [sport, setSport] = useState<Sport>('basketball');
   const [tournamentFormat, setTournamentFormat] = useState<TournamentFormat>('3v3');
@@ -57,25 +45,15 @@ export default function CreateTournament() {
   const [pointsStyle, setPointsStyle] = useState<PointsStyle>('1s_and_2s');
   const [makeItTakeIt, setMakeItTakeIt] = useState(false);
 
-  // Fix: define isPrivate (you were referencing it but it didn't exist)
   const [isPrivate, setIsPrivate] = useState(false);
+  const [joinMode, setJoinMode] = useState<TournamentJoinMode>('solo');
 
-  const [location, setLocation] = useState({
-    latitude: 34.0195,
-    longitude: -118.4912,
-    areaName: '',
-  });
+  const [location, setLocation] = useState({ latitude: 34.0195, longitude: -118.4912, areaName: '' });
   const [dateTime, setDateTime] = useState('');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!canCreate.allowed) {
-    return null;
-  }
-
   const handleSubmit = async () => {
-    console.log('[CreateTournament] clicked');
-
     if (!user?.id) {
       toast.error('Please sign in first');
       return;
@@ -93,32 +71,29 @@ export default function CreateTournament() {
       return;
     }
 
-    setIsSubmitting(true);
-
     try {
-      const payload = {
+      setIsSubmitting(true);
+
+      await createTournament({
         hostId: user.id,
         name: name.trim(),
         sport,
-        format: tournamentFormat, // Fix: was "format" (undefined)
+        format: tournamentFormat,
         seriesType,
         teamCount,
         pointsStyle,
         isPrivate,
+        joinMode,
         location,
         startsAtISO: new Date(dateTime).toISOString(),
         notes: notes.trim() ? notes.trim() : null,
-      };
-
-      console.log('[CreateTournament] payload', payload);
-
-      await createTournament(payload);
+      });
 
       toast.success('Tournament created!');
       navigate('/tournaments');
     } catch (e: any) {
-      console.error('[CreateTournament] create failed:', e);
-      toast.error(e?.message ? `Failed: ${e.message}` : 'Failed to create tournament. Check Supabase / RLS.');
+      console.error(e);
+      toast.error(e?.message ? `Failed: ${e.message}` : 'Failed to create tournament. Check Supabase tables / RLS.');
     } finally {
       setIsSubmitting(false);
     }
@@ -156,11 +131,7 @@ export default function CreateTournament() {
         {/* Sport Selection */}
         <div className="space-y-2">
           <Label>Sport</Label>
-          <SportSelector
-            selected={sport}
-            onChange={(s) => s !== 'all' && setSport(s)}
-            showAll={false}
-          />
+          <SportSelector selected={sport} onChange={(s) => s !== 'all' && setSport(s)} showAll={false} />
         </div>
 
         {/* Format */}
@@ -175,7 +146,7 @@ export default function CreateTournament() {
                   'px-3 py-2 rounded-xl text-sm font-medium transition-all',
                   tournamentFormat === f.id
                     ? 'bg-primary text-primary-foreground'
-                    : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
+                    : 'bg-secondary/60 text-muted-foreground hover:bg-secondary',
                 )}
                 type="button"
               >
@@ -195,7 +166,7 @@ export default function CreateTournament() {
                 'p-4 rounded-xl text-left transition-all',
                 seriesType === 'single_elimination'
                   ? 'bg-primary/10 border-2 border-primary'
-                  : 'bg-secondary/60 border-2 border-transparent'
+                  : 'bg-secondary/60 border-2 border-transparent',
               )}
               type="button"
             >
@@ -205,14 +176,13 @@ export default function CreateTournament() {
               </div>
               <p className="text-xs text-muted-foreground">One loss and you&apos;re out</p>
             </button>
-
             <button
               onClick={() => setSeriesType('best_of_3')}
               className={cn(
                 'p-4 rounded-xl text-left transition-all',
                 seriesType === 'best_of_3'
                   ? 'bg-primary/10 border-2 border-primary'
-                  : 'bg-secondary/60 border-2 border-transparent'
+                  : 'bg-secondary/60 border-2 border-transparent',
               )}
               type="button"
             >
@@ -223,7 +193,6 @@ export default function CreateTournament() {
               <p className="text-xs text-muted-foreground">Win 2 games per match</p>
             </button>
           </div>
-
           {seriesType === 'best_of_3' && (
             <div className="flex items-start gap-2 p-3 bg-primary/5 rounded-lg mt-2">
               <Info className="w-4 h-4 text-primary mt-0.5" />
@@ -251,6 +220,29 @@ export default function CreateTournament() {
           </Select>
         </div>
 
+        {/* Entry Mode */}
+        <div className="glass-card p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-primary" />
+            <h3 className="font-semibold">How teams join</h3>
+          </div>
+
+          <Select value={joinMode} onValueChange={(v) => setJoinMode(v as TournamentJoinMode)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select join mode" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="solo">Individuals (join as yourself)</SelectItem>
+              <SelectItem value="squad">Squads only (join with a squad)</SelectItem>
+              <SelectItem value="either">Either (user can choose)</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <p className="text-xs text-muted-foreground">
+            Squad tournaments let people enter with an existing squad. This is stored on the tournament and used when joining.
+          </p>
+        </div>
+
         {/* Game Rules */}
         <div className="glass-card p-4 space-y-4">
           <div className="flex items-center gap-2 mb-2">
@@ -272,7 +264,7 @@ export default function CreateTournament() {
                   'px-4 py-3 rounded-xl text-sm font-medium transition-all',
                   pointsStyle === '1s_and_2s'
                     ? 'bg-primary text-primary-foreground'
-                    : 'bg-secondary/60 text-muted-foreground'
+                    : 'bg-secondary/60 text-muted-foreground',
                 )}
                 type="button"
               >
@@ -284,7 +276,7 @@ export default function CreateTournament() {
                   'px-4 py-3 rounded-xl text-sm font-medium transition-all',
                   pointsStyle === '2s_and_3s'
                     ? 'bg-primary text-primary-foreground'
-                    : 'bg-secondary/60 text-muted-foreground'
+                    : 'bg-secondary/60 text-muted-foreground',
                 )}
                 type="button"
               >
@@ -300,9 +292,13 @@ export default function CreateTournament() {
             </div>
             <Switch checked={makeItTakeIt} onCheckedChange={setMakeItTakeIt} />
           </div>
+
+          <p className="text-xs text-muted-foreground">
+            These rules are currently UI-only. If you want them persisted, we can add columns and save them.
+          </p>
         </div>
 
-        {/* Private */}
+        {/* Private toggle */}
         <div className="glass-card p-4 flex items-center justify-between">
           <div className="flex items-start gap-3">
             <Lock className="w-4 h-4 text-primary mt-0.5" />
@@ -349,12 +345,7 @@ export default function CreateTournament() {
         </div>
 
         {/* Submit */}
-        <Button
-          type="button"
-          className="w-full h-14 text-lg"
-          onClick={handleSubmit}
-          disabled={isSubmitting}
-        >
+        <Button className="w-full h-14 text-lg" type="button" onClick={handleSubmit} disabled={isSubmitting}>
           <Trophy className="w-5 h-5 mr-2" />
           {isSubmitting ? 'Creating...' : 'Create Tournament'}
         </Button>
