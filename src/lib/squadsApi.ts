@@ -15,6 +15,15 @@ export type SquadWithMeta = SquadRow & {
   is_owner: boolean;
 };
 
+export type SquadMemberProfile = {
+  squad_id: string;
+  user_id: string;
+  role: string;
+  username: string | null;
+  xp: number;
+  level: number;
+};
+
 function makeInviteCode(len = 6): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
   let out = '';
@@ -128,4 +137,74 @@ export async function joinSquadByCode(args: { userId: string; code: string }): P
   }
 
   return squad as SquadRow;
+}
+
+export async function fetchSquadById(squadId: string): Promise<SquadRow> {
+  const { data, error } = await supabase.from('squads').select('*').eq('id', squadId).single();
+  if (error) throw error;
+  return data as SquadRow;
+}
+
+export async function fetchSquadMembers(squadId: string): Promise<SquadMemberProfile[]> {
+  // role + profile
+  const { data, error } = await supabase
+    .from('squad_members')
+    .select('squad_id, user_id, role, profiles:profiles(id, username, xp)')
+    .eq('squad_id', squadId);
+
+  if (error) throw error;
+
+  return (data ?? []).map((row: any) => {
+    const p = row.profiles ?? null;
+    const xp = typeof p?.xp === 'number' ? p.xp : Number(p?.xp ?? 0);
+    return {
+      squad_id: row.squad_id,
+      user_id: row.user_id,
+      role: row.role ?? 'member',
+      username: p?.username ?? null,
+      xp: Number.isFinite(xp) ? xp : 0,
+      level: Math.max(1, Math.floor((Number.isFinite(xp) ? xp : 0) / 100) + 1),
+    } as SquadMemberProfile;
+  });
+}
+
+export type SquadLeaderboardRow = {
+  squad_id: string;
+  name: string;
+  sport: Sport | null;
+  member_count: number;
+  total_xp: number;
+  created_at: string;
+};
+
+export async function fetchSquadLeaderboard(limit = 50): Promise<SquadLeaderboardRow[]> {
+  // Prefer a SQL view if present.
+  const { data, error } = await supabase
+    .from('squad_leaderboard')
+    .select('*')
+    .order('total_xp', { ascending: false })
+    .limit(limit);
+  if (!error) return (data ?? []) as SquadLeaderboardRow[];
+
+  // Fallback: compute client-side (slower, but works if view not installed).
+  const { data: squads, error: sErr } = await supabase.from('squads').select('*').order('created_at', { ascending: false }).limit(limit);
+  if (sErr) throw sErr;
+  const out: SquadLeaderboardRow[] = [];
+  for (const s of squads ?? []) {
+    try {
+      const members = await fetchSquadMembers((s as any).id);
+      out.push({
+        squad_id: (s as any).id,
+        name: (s as any).name,
+        sport: (s as any).sport ?? null,
+        member_count: members.length,
+        total_xp: members.reduce((sum, m) => sum + (m.xp ?? 0), 0),
+        created_at: (s as any).created_at,
+      });
+    } catch {
+      // ignore
+    }
+  }
+  out.sort((a, b) => b.total_xp - a.total_xp);
+  return out;
 }

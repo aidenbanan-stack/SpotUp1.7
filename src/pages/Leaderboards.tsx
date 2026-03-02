@@ -5,7 +5,9 @@ import { useApp } from '@/context/AppContext';
 import { supabase } from '@/lib/supabaseClient';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
-import { PLAYER_LEVELS, type PlayerLevel } from '@/types';
+import { PLAYER_LEVELS, SPORTS, type PlayerLevel } from '@/types';
+import { fetchSquadLeaderboard, type SquadLeaderboardRow } from '@/lib/squadsApi';
+import { cn } from '@/lib/utils';
 
 type Row = {
   id: string;
@@ -31,13 +33,15 @@ export default function Leaderboards() {
   const { user } = useApp();
 
   const [rows, setRows] = useState<Row[]>([]);
+  const [squadRows, setSquadRows] = useState<SquadLeaderboardRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
+  const [tab, setTab] = useState<'players' | 'squads'>('players');
 
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
+    async function loadPlayers() {
       try {
         setLoading(true);
         const { data, error } = await supabase
@@ -56,7 +60,24 @@ export default function Leaderboards() {
       }
     }
 
-    load();
+    loadPlayers();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSquads() {
+      try {
+        const data = await fetchSquadLeaderboard(100);
+        if (!cancelled) setSquadRows(data);
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) setSquadRows([]);
+      }
+    }
+    loadSquads();
     return () => {
       cancelled = true;
     };
@@ -64,9 +85,13 @@ export default function Leaderboards() {
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    if (!term) return rows;
-    return rows.filter((r) => (r.username ?? '').toLowerCase().includes(term));
-  }, [rows, q]);
+    if (tab === 'players') {
+      if (!term) return rows;
+      return rows.filter((r) => (r.username ?? '').toLowerCase().includes(term));
+    }
+    if (!term) return squadRows;
+    return squadRows.filter((s) => (s.name ?? '').toLowerCase().includes(term));
+  }, [rows, squadRows, q, tab]);
 
   return (
     <div className="min-h-screen bg-background safe-top pb-24">
@@ -81,33 +106,59 @@ export default function Leaderboards() {
       </header>
 
       <main className="px-4 py-5 max-w-2xl mx-auto space-y-4">
+        <div className="flex gap-2">
+          <button
+            className={cn(
+              'flex-1 h-11 rounded-xl text-sm font-semibold transition',
+              tab === 'players' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-foreground',
+            )}
+            onClick={() => setTab('players')}
+          >
+            Players
+          </button>
+          <button
+            className={cn(
+              'flex-1 h-11 rounded-xl text-sm font-semibold transition',
+              tab === 'squads' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-foreground',
+            )}
+            onClick={() => setTab('squads')}
+          >
+            Squads
+          </button>
+        </div>
+
         <div className="flex items-center gap-2">
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search players..."
+            placeholder={tab === 'players' ? 'Search players...' : 'Search squads...'}
             className="bg-secondary/60"
           />
         </div>
 
-        {loading ? (
+        {loading && tab === 'players' ? (
           <div className="glass-card p-6 text-center">
             <p className="text-sm text-muted-foreground">Loading leaderboard...</p>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : (filtered as any[]).length === 0 ? (
           <div className="glass-card p-6 text-center">
-            <p className="font-semibold">No players yet</p>
-            <p className="text-sm text-muted-foreground mt-1">Once profiles have XP, rankings will show here.</p>
+            <p className="font-semibold">Nothing to show yet</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {tab === 'players'
+                ? 'Once profiles have XP, rankings will show here.'
+                : 'Create squads and play games to climb the squad leaderboard.'}
+            </p>
           </div>
         ) : (
           <div className="glass-card overflow-hidden">
             <div className="px-4 py-3 border-b border-border/50 flex items-center gap-2">
               <Trophy className="w-4 h-4" />
-              <p className="font-semibold">Top Players</p>
+              <p className="font-semibold">{tab === 'players' ? 'Top Players' : 'Top Squads'}</p>
             </div>
 
             <div className="divide-y divide-border/50">
-              {filtered.map((r, idx) => {
+              {tab === 'players'
+                ? (filtered as Row[]).map((r, idx) => {
                 const xp = Number(r.xp ?? 0);
                 const lvl = levelFromXP(xp);
                 const icon = levelIcon(lvl);
@@ -156,7 +207,52 @@ export default function Leaderboards() {
                     </div>
                   </button>
                 );
-              })}
+              })
+                : (filtered as SquadLeaderboardRow[]).map((s, idx) => {
+                    const rank = idx + 1;
+                    const sport = (s.sport ?? null) as any;
+                    const sportMeta = sport ? (SPORTS as any)[sport] : null;
+                    const icon = sportMeta?.icon ?? '👥';
+
+                    return (
+                      <button
+                        key={s.squad_id}
+                        onClick={() => navigate(`/squad/${s.squad_id}`)}
+                        className="w-full flex items-center justify-between px-4 py-3 hover:bg-secondary/30 transition-colors text-left"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 flex items-center justify-center">
+                            {rank === 1 ? (
+                              <Medal className="w-5 h-5" />
+                            ) : rank === 2 ? (
+                              <span className="text-lg">🥈</span>
+                            ) : rank === 3 ? (
+                              <span className="text-lg">🥉</span>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">#{rank}</span>
+                            )}
+                          </div>
+
+                          <div className="w-10 h-10 rounded-2xl bg-secondary/60 flex items-center justify-center text-lg border border-border/60">
+                            {icon}
+                          </div>
+
+                          <div className="min-w-0">
+                            <p className="font-semibold truncate">{s.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {s.member_count} member{s.member_count === 1 ? '' : 's'}
+                              {sportMeta ? <span className="ml-2">• {sportMeta.label}</span> : null}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <p className="text-sm font-semibold">{Number(s.total_xp ?? 0).toLocaleString()}</p>
+                          <p className="text-xs text-muted-foreground">Squad XP</p>
+                        </div>
+                      </button>
+                    );
+                  })}
             </div>
           </div>
         )}

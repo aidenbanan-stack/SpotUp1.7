@@ -27,6 +27,7 @@ import Friends from "./pages/Friends";
 import GameHistory from "./pages/GameHistory";
 import Messages from "./pages/Messages";
 import Squads from "./pages/Squads";
+import SquadDetail from "./pages/SquadDetail";
 import Settings from "./pages/Settings";
 
 const queryClient = new QueryClient();
@@ -61,6 +62,7 @@ const App = () => (
               <Route path="/history" element={<GameHistory />} />
               <Route path="/messages" element={<Messages />} />
               <Route path="/squads" element={<Squads />} />
+              <Route path="/squad/:id" element={<SquadDetail />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="*" element={<NotFound />} />

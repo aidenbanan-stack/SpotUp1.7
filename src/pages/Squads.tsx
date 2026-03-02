@@ -20,6 +20,8 @@ export default function Squads() {
   const [squads, setSquads] = useState<SquadWithMeta[]>([]);
   const [q, setQ] = useState('');
 
+  const [tab, setTab] = useState<'my' | 'join'>('my');
+
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
 
@@ -140,14 +142,67 @@ export default function Squads() {
       </header>
 
       <main className="px-4 py-5 max-w-2xl mx-auto space-y-4">
-        <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search squads..."
-          className="bg-secondary/60"
-        />
+        {/* Tabs (Clash Royale-ish) */}
+        <div className="flex gap-2">
+          <button
+            className={cn(
+              'flex-1 h-11 rounded-xl text-sm font-semibold transition',
+              tab === 'my' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-foreground',
+            )}
+            onClick={() => setTab('my')}
+          >
+            My Squads
+          </button>
+          <button
+            className={cn(
+              'flex-1 h-11 rounded-xl text-sm font-semibold transition',
+              tab === 'join' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-foreground',
+            )}
+            onClick={() => setTab('join')}
+          >
+            Join Squad
+          </button>
+        </div>
 
-        {loading ? (
+        {tab === 'my' ? (
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search squads..."
+            className="bg-secondary/60"
+          />
+        ) : null}
+
+        {tab === 'join' ? (
+          <div className="glass-card p-5 space-y-4">
+            <div>
+              <p className="font-semibold">Join with invite code</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Just like clans, squads use invite codes. Ask the squad owner for theirs.
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              <Input
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="Ex: K7P2QJ"
+                className="bg-secondary/60"
+                autoCapitalize="characters"
+              />
+              <Button onClick={onJoin} disabled={!code.trim()} className="h-11">
+                Join
+              </Button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">Invite codes are case-insensitive.</p>
+              <Button variant="secondary" onClick={() => setCreateOpen(true)}>
+                Create squad
+              </Button>
+            </div>
+          </div>
+        ) : loading ? (
           <div className="glass-card p-6 text-center">
             <p className="text-sm text-muted-foreground">Loading squads...</p>
           </div>
@@ -169,7 +224,12 @@ export default function Squads() {
           <div className="space-y-3">
             {filtered.map((s) => (
               <div key={s.id} className="glass-card p-4">
-                <div className="flex items-start justify-between gap-3">
+                <button
+                  className="w-full text-left"
+                  onClick={() => navigate(`/squad/${s.id}`)}
+                  aria-label={`Open squad ${s.name}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-11 h-11 rounded-2xl bg-secondary/60 flex items-center justify-center text-lg">
                       {sportIcon(s.sport)}
@@ -192,7 +252,8 @@ export default function Squads() {
                     <Button
                       variant="secondary"
                       className="h-9"
-                      onClick={async () => {
+                      onClick={async (e) => {
+                        e.stopPropagation();
                         try {
                           await navigator.clipboard.writeText(s.invite_code);
                           alert('Invite code copied!');
@@ -206,7 +267,8 @@ export default function Squads() {
 
                     <p className="text-xs text-muted-foreground">Code: {s.invite_code}</p>
                   </div>
-                </div>
+                  </div>
+                </button>
               </div>
             ))}
           </div>

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Calendar, MapPin, Lock, Trophy, Users } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
-import { SPORTS } from '@/types';
+import { SPORTS } from '@/data/mockData';
 import {
   fetchTournamentById,
   isUserRegistered,
