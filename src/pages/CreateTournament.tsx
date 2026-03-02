@@ -3,24 +3,25 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { createTournament } from '@/lib/tournamentsApi';
 
-import { 
-  TournamentFormat, 
-  SeriesType, 
-  TeamCount, 
+import {
+  TournamentFormat,
+  SeriesType,
+  TeamCount,
   PointsStyle,
-  TOURNAMENT_FORMATS, 
-  TEAM_COUNTS, 
+  TOURNAMENT_FORMATS,
+  TEAM_COUNTS,
   Sport,
-  canCreateTournament 
+  canCreateTournament,
 } from '@/types';
-import { 
+import {
   ArrowLeft,
   Trophy,
   MapPin,
   Calendar,
   Target,
   Info,
-  Check
+  Check,
+  Lock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -45,7 +46,12 @@ export default function CreateTournament() {
   const { user } = useApp();
 
   // Check if user can create tournaments
-  const canCreate = user ? canCreateTournament(user) : { allowed: false, requirements: { reliability: false, hostRating: false, gamesHosted: false } };
+  const canCreate = user
+    ? canCreateTournament(user)
+    : {
+        allowed: false,
+        requirements: { reliability: false, hostRating: false, gamesHosted: false },
+      };
 
   useEffect(() => {
     if (!canCreate.allowed) {
@@ -61,57 +67,66 @@ export default function CreateTournament() {
   const [playToScore, setPlayToScore] = useState(21);
   const [pointsStyle, setPointsStyle] = useState<PointsStyle>('1s_and_2s');
   const [makeItTakeIt, setMakeItTakeIt] = useState(false);
-  const [location, setLocation] = useState({ latitude: 34.0195, longitude: -118.4912, areaName: '' });
+
+  // If you don't support private tournaments yet, you can leave this default false
+  const [isPrivate, setIsPrivate] = useState(false);
+
+  const [location, setLocation] = useState({
+    latitude: 34.0195,
+    longitude: -118.4912,
+    areaName: '',
+  });
   const [dateTime, setDateTime] = useState('');
   const [notes, setNotes] = useState('');
-  
-  // Google Maps uses a single deployment-wide API key via env var (VITE_GOOGLE_MAPS_API_KEY).
 
   if (!canCreate.allowed) {
     return null;
   }
 
-  
-const handleSubmit = async () => {
-  if (!user?.id) {
-    toast.error('Please sign in first');
-    return;
-  }
-  if (!name.trim()) {
-    toast.error('Please enter a tournament name');
-    return;
-  }
-  if (!location.areaName) {
-    toast.error('Please select a location');
-    return;
-  }
-  if (!dateTime) {
-    toast.error('Please select a date and time');
-    return;
-  }
+  const handleSubmit = async () => {
+    if (!user?.id) {
+      toast.error('Please sign in first');
+      return;
+    }
+    if (!name.trim()) {
+      toast.error('Please enter a tournament name');
+      return;
+    }
+    if (!location.areaName) {
+      toast.error('Please select a location');
+      return;
+    }
+    if (!dateTime) {
+      toast.error('Please select a date and time');
+      return;
+    }
 
-  try {
-    await createTournament({
-      hostId: user.id,
-      name: name.trim(),
-      sport,
-      format,
-      seriesType,
-      teamCount,
-      pointsStyle,
-      isPrivate,
-      location,
-      startsAtISO: new Date(dateTime).toISOString(),
-      notes: notes.trim() ? notes.trim() : null,
-    });
+    try {
+      await createTournament({
+        hostId: user.id,
+        name: name.trim(),
+        sport,
+        format: tournamentFormat, // FIX: was "format" (undefined)
+        seriesType,
+        teamCount,
+        pointsStyle,
+        isPrivate, // FIX: was "isPrivate" (undefined); now state-backed
+        location,
+        startsAtISO: new Date(dateTime).toISOString(),
+        notes: notes.trim() ? notes.trim() : null,
 
-    toast.success('Tournament created!');
-    navigate('/tournaments');
-  } catch (e) {
-    console.error(e);
-    toast.error('Failed to create tournament. Check Supabase tables / RLS.');
-  }
-};
+        // NOTE:
+        // playToScore and makeItTakeIt are not being persisted unless your API/table supports them.
+        // If you have columns for these, add them to createTournament() + DB insert payload.
+      });
+
+      toast.success('Tournament created!');
+      navigate('/tournaments');
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to create tournament. Check Supabase tables / RLS.');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background pb-24 safe-top">
@@ -191,7 +206,7 @@ const handleSubmit = async () => {
                   <Check className="w-4 h-4 text-primary" />
                 )}
               </div>
-              <p className="text-xs text-muted-foreground">One loss and you're out</p>
+              <p className="text-xs text-muted-foreground">One loss and you&apos;re out</p>
             </button>
             <button
               onClick={() => setSeriesType('best_of_3')}
@@ -224,7 +239,10 @@ const handleSubmit = async () => {
         {/* Team Count */}
         <div className="space-y-2">
           <Label>Number of Teams</Label>
-          <Select value={String(teamCount)} onValueChange={(v) => setTeamCount(Number(v) as TeamCount)}>
+          <Select
+            value={String(teamCount)}
+            onValueChange={(v) => setTeamCount(Number(v) as TeamCount)}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -290,13 +308,28 @@ const handleSubmit = async () => {
           <div className="flex items-center justify-between">
             <div>
               <Label>Make-it take-it</Label>
-              <p className="text-xs text-muted-foreground">Winner keeps possession after scoring</p>
+              <p className="text-xs text-muted-foreground">
+                Winner keeps possession after scoring
+              </p>
             </div>
-            <Switch
-              checked={makeItTakeIt}
-              onCheckedChange={setMakeItTakeIt}
-            />
+            <Switch checked={makeItTakeIt} onCheckedChange={setMakeItTakeIt} />
           </div>
+        </div>
+
+        {/* Private toggle (optional but fixes undefined isPrivate) */}
+        <div className="glass-card p-4 flex items-center justify-between">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5">
+              <Lock className="w-4 h-4 text-primary" />
+            </div>
+            <div>
+              <Label>Private tournament</Label>
+              <p className="text-xs text-muted-foreground">
+                Only invited players can view or join
+              </p>
+            </div>
+          </div>
+          <Switch checked={isPrivate} onCheckedChange={setIsPrivate} />
         </div>
 
         {/* Location */}
@@ -305,10 +338,7 @@ const handleSubmit = async () => {
             <MapPin className="w-4 h-4" />
             Location
           </Label>
-          <LocationPicker
-            value={location}
-            onChange={setLocation}
-          />
+          <LocationPicker value={location} onChange={setLocation} />
         </div>
 
         {/* Date & Time */}
@@ -337,10 +367,7 @@ const handleSubmit = async () => {
         </div>
 
         {/* Submit */}
-        <Button 
-          className="w-full h-14 text-lg"
-          onClick={handleSubmit}
-        >
+        <Button className="w-full h-14 text-lg" onClick={handleSubmit}>
           <Trophy className="w-5 h-5 mr-2" />
           Create Tournament
         </Button>
