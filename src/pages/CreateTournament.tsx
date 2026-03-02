@@ -13,16 +13,7 @@ import {
   Sport,
   canCreateTournament,
 } from '@/types';
-import {
-  ArrowLeft,
-  Trophy,
-  MapPin,
-  Calendar,
-  Target,
-  Info,
-  Check,
-  Lock,
-} from 'lucide-react';
+import { ArrowLeft, Trophy, MapPin, Calendar, Target, Info, Check, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -48,10 +39,7 @@ export default function CreateTournament() {
   // Check if user can create tournaments
   const canCreate = user
     ? canCreateTournament(user)
-    : {
-        allowed: false,
-        requirements: { reliability: false, hostRating: false, gamesHosted: false },
-      };
+    : { allowed: false, requirements: { reliability: false, hostRating: false, gamesHosted: false } };
 
   useEffect(() => {
     if (!canCreate.allowed) {
@@ -64,11 +52,12 @@ export default function CreateTournament() {
   const [tournamentFormat, setTournamentFormat] = useState<TournamentFormat>('3v3');
   const [seriesType, setSeriesType] = useState<SeriesType>('single_elimination');
   const [teamCount, setTeamCount] = useState<TeamCount>(8);
+
   const [playToScore, setPlayToScore] = useState(21);
   const [pointsStyle, setPointsStyle] = useState<PointsStyle>('1s_and_2s');
   const [makeItTakeIt, setMakeItTakeIt] = useState(false);
 
-  // If you don't support private tournaments yet, you can leave this default false
+  // Fix: define isPrivate (you were referencing it but it didn't exist)
   const [isPrivate, setIsPrivate] = useState(false);
 
   const [location, setLocation] = useState({
@@ -78,12 +67,15 @@ export default function CreateTournament() {
   });
   const [dateTime, setDateTime] = useState('');
   const [notes, setNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!canCreate.allowed) {
     return null;
   }
 
   const handleSubmit = async () => {
+    console.log('[CreateTournament] clicked');
+
     if (!user?.id) {
       toast.error('Please sign in first');
       return;
@@ -101,30 +93,34 @@ export default function CreateTournament() {
       return;
     }
 
+    setIsSubmitting(true);
+
     try {
-      await createTournament({
+      const payload = {
         hostId: user.id,
         name: name.trim(),
         sport,
-        format: tournamentFormat, // FIX: was "format" (undefined)
+        format: tournamentFormat, // Fix: was "format" (undefined)
         seriesType,
         teamCount,
         pointsStyle,
-        isPrivate, // FIX: was "isPrivate" (undefined); now state-backed
+        isPrivate,
         location,
         startsAtISO: new Date(dateTime).toISOString(),
         notes: notes.trim() ? notes.trim() : null,
+      };
 
-        // NOTE:
-        // playToScore and makeItTakeIt are not being persisted unless your API/table supports them.
-        // If you have columns for these, add them to createTournament() + DB insert payload.
-      });
+      console.log('[CreateTournament] payload', payload);
+
+      await createTournament(payload);
 
       toast.success('Tournament created!');
       navigate('/tournaments');
-    } catch (e) {
-      console.error(e);
-      toast.error('Failed to create tournament. Check Supabase tables / RLS.');
+    } catch (e: any) {
+      console.error('[CreateTournament] create failed:', e);
+      toast.error(e?.message ? `Failed: ${e.message}` : 'Failed to create tournament. Check Supabase / RLS.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -136,6 +132,7 @@ export default function CreateTournament() {
           <button
             onClick={() => navigate(-1)}
             className="p-2 -ml-2 rounded-xl hover:bg-secondary/60"
+            type="button"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -180,6 +177,7 @@ export default function CreateTournament() {
                     ? 'bg-primary text-primary-foreground'
                     : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
                 )}
+                type="button"
               >
                 {f.name}
               </button>
@@ -199,15 +197,15 @@ export default function CreateTournament() {
                   ? 'bg-primary/10 border-2 border-primary'
                   : 'bg-secondary/60 border-2 border-transparent'
               )}
+              type="button"
             >
               <div className="flex items-center justify-between mb-1">
                 <span className="font-medium">Single Elimination</span>
-                {seriesType === 'single_elimination' && (
-                  <Check className="w-4 h-4 text-primary" />
-                )}
+                {seriesType === 'single_elimination' && <Check className="w-4 h-4 text-primary" />}
               </div>
               <p className="text-xs text-muted-foreground">One loss and you&apos;re out</p>
             </button>
+
             <button
               onClick={() => setSeriesType('best_of_3')}
               className={cn(
@@ -216,16 +214,16 @@ export default function CreateTournament() {
                   ? 'bg-primary/10 border-2 border-primary'
                   : 'bg-secondary/60 border-2 border-transparent'
               )}
+              type="button"
             >
               <div className="flex items-center justify-between mb-1">
                 <span className="font-medium">Best of 3</span>
-                {seriesType === 'best_of_3' && (
-                  <Check className="w-4 h-4 text-primary" />
-                )}
+                {seriesType === 'best_of_3' && <Check className="w-4 h-4 text-primary" />}
               </div>
               <p className="text-xs text-muted-foreground">Win 2 games per match</p>
             </button>
           </div>
+
           {seriesType === 'best_of_3' && (
             <div className="flex items-start gap-2 p-3 bg-primary/5 rounded-lg mt-2">
               <Info className="w-4 h-4 text-primary mt-0.5" />
@@ -239,10 +237,7 @@ export default function CreateTournament() {
         {/* Team Count */}
         <div className="space-y-2">
           <Label>Number of Teams</Label>
-          <Select
-            value={String(teamCount)}
-            onValueChange={(v) => setTeamCount(Number(v) as TeamCount)}
-          >
+          <Select value={String(teamCount)} onValueChange={(v) => setTeamCount(Number(v) as TeamCount)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -263,19 +258,11 @@ export default function CreateTournament() {
             <h3 className="font-semibold">Game Rules</h3>
           </div>
 
-          {/* Play to Score */}
           <div className="flex items-center justify-between">
             <Label>Play to</Label>
-            <NumberStepper
-              value={playToScore}
-              onChange={setPlayToScore}
-              min={5}
-              max={50}
-              step={1}
-            />
+            <NumberStepper value={playToScore} onChange={setPlayToScore} min={5} max={50} step={1} />
           </div>
 
-          {/* Points Style */}
           <div className="space-y-2">
             <Label>Points Style</Label>
             <div className="grid grid-cols-2 gap-2">
@@ -287,6 +274,7 @@ export default function CreateTournament() {
                     ? 'bg-primary text-primary-foreground'
                     : 'bg-secondary/60 text-muted-foreground'
                 )}
+                type="button"
               >
                 1s and 2s
               </button>
@@ -298,35 +286,29 @@ export default function CreateTournament() {
                     ? 'bg-primary text-primary-foreground'
                     : 'bg-secondary/60 text-muted-foreground'
                 )}
+                type="button"
               >
                 2s and 3s
               </button>
             </div>
           </div>
 
-          {/* Make it Take it */}
           <div className="flex items-center justify-between">
             <div>
               <Label>Make-it take-it</Label>
-              <p className="text-xs text-muted-foreground">
-                Winner keeps possession after scoring
-              </p>
+              <p className="text-xs text-muted-foreground">Winner keeps possession after scoring</p>
             </div>
             <Switch checked={makeItTakeIt} onCheckedChange={setMakeItTakeIt} />
           </div>
         </div>
 
-        {/* Private toggle (optional but fixes undefined isPrivate) */}
+        {/* Private */}
         <div className="glass-card p-4 flex items-center justify-between">
           <div className="flex items-start gap-3">
-            <div className="mt-0.5">
-              <Lock className="w-4 h-4 text-primary" />
-            </div>
+            <Lock className="w-4 h-4 text-primary mt-0.5" />
             <div>
               <Label>Private tournament</Label>
-              <p className="text-xs text-muted-foreground">
-                Only invited players can view or join
-              </p>
+              <p className="text-xs text-muted-foreground">Only invited players can view or join</p>
             </div>
           </div>
           <Switch checked={isPrivate} onCheckedChange={setIsPrivate} />
@@ -367,9 +349,14 @@ export default function CreateTournament() {
         </div>
 
         {/* Submit */}
-        <Button className="w-full h-14 text-lg" onClick={handleSubmit}>
+        <Button
+          type="button"
+          className="w-full h-14 text-lg"
+          onClick={handleSubmit}
+          disabled={isSubmitting}
+        >
           <Trophy className="w-5 h-5 mr-2" />
-          Create Tournament
+          {isSubmitting ? 'Creating...' : 'Create Tournament'}
         </Button>
       </main>
     </div>
