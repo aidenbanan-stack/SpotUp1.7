@@ -9,12 +9,11 @@ import {
   fetchMyFriendIds,
   fetchMyFriends,
   fetchMyIncomingFriendRequests,
-  fetchMyOutgoingFriendRequests,
   rejectFriendRequest,
   sendFriendRequest,
 } from '@/lib/socialApi';
 import type { User } from '@/types';
-import { fetchProfilesByIds, searchProfiles } from '@/lib/profileApi';
+import { searchProfiles } from '@/lib/profileApi';
 import { Button } from '@/components/ui/button';
 import PlayerProfileDialog from '@/components/PlayerProfileDialog';
 import { toast } from 'sonner';
@@ -39,7 +38,6 @@ export default function Friends() {
   const [friends, setFriends] = useState<User[]>([]);
   const [friendIds, setFriendIds] = useState<string[]>([]);
   const [incomingReqs, setIncomingReqs] = useState<User[]>([]);
-  const [outgoingReqs, setOutgoingReqs] = useState<User[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [query, setQuery] = useState<string>('');
 
@@ -69,23 +67,16 @@ export default function Friends() {
 
       setLoading(true);
       try {
-        const [ids, f, incoming, outgoing] = await Promise.all([
-          fetchMyFriendIds(),
-          fetchMyFriends(),
-          fetchMyIncomingFriendRequests(),
-          fetchMyOutgoingFriendRequests(),
-        ]);
+        const [ids, f, incoming] = await Promise.all([fetchMyFriendIds(), fetchMyFriends(), fetchMyIncomingFriendRequests()]);
         if (!mounted) return;
         setFriendIds(ids);
         setFriends(f);
         setIncomingReqs(incoming);
-        setOutgoingReqs(await fetchProfilesByIds(outgoing.map((r) => r.toUserId)));
       } catch {
         if (!mounted) return;
         setFriendIds([]);
         setFriends([]);
         setIncomingReqs([]);
-        setOutgoingReqs([]);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -152,8 +143,6 @@ export default function Friends() {
       await sendFriendRequest(toUserId);
       toast.success(`Friend request sent to ${username}`);
       setDiscoverResults((prev) => prev.filter((u) => u.id !== toUserId));
-      const outgoing = await fetchMyOutgoingFriendRequests();
-      setOutgoingReqs(await fetchProfilesByIds(outgoing.map((r) => r.toUserId)));
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to send friend request.';
       toast.error(msg);
@@ -225,7 +214,6 @@ export default function Friends() {
                               setFriendIds(ids);
                               setFriends(f);
                               setIncomingReqs(incoming);
-        setOutgoingReqs(await fetchProfilesByIds(outgoing.map((r) => r.toUserId)));
                             } catch (err) {
                               const msg = err instanceof Error ? err.message : 'Failed to accept request.';
                               toast.error(msg);
@@ -245,7 +233,6 @@ export default function Friends() {
                               toast.success('Request declined.');
                               const incoming = await fetchMyIncomingFriendRequests();
                               setIncomingReqs(incoming);
-        setOutgoingReqs(await fetchProfilesByIds(outgoing.map((r) => r.toUserId)));
                             } catch (err) {
                               const msg = err instanceof Error ? err.message : 'Failed to decline request.';
                               toast.error(msg);
@@ -256,33 +243,6 @@ export default function Friends() {
                         </Button>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {outgoingReqs.length > 0 && (
-              <div className="glass-card p-4">
-                <p className="font-semibold">Pending sent</p>
-                <div className="mt-3 space-y-2">
-                  {outgoingReqs.map((r) => (
-                    <button
-                      key={r.id}
-                      onClick={() => openProfile(r.id)}
-                      className="flex items-center justify-between gap-3 bg-secondary/40 rounded-xl p-3 w-full text-left"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <Avatar className="w-9 h-9">
-                          <AvatarImage src={r.profilePhotoUrl} alt={r.username} />
-                          <AvatarFallback>{initials(r.username)}</AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0">
-                          <p className="font-semibold truncate">{r.username}</p>
-                          <p className="text-xs text-muted-foreground truncate">Request pending</p>
-                        </div>
-                      </div>
-                      <span className="text-xs text-muted-foreground">Pending</span>
-                    </button>
                   ))}
                 </div>
               </div>

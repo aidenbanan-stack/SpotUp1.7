@@ -429,27 +429,27 @@ export async function getOrCreateConversationWithUser(otherUserId: string): Prom
     }
   }
 
-  // Insert memberships sequentially so projects with stricter RLS can add self first,
-  // then add the other member only after the requester is already a member.
-  const ensureMembership = async (targetUserId: string) => {
-    const { error: memberErr } = await supabase
-      .from('conversation_members')
-      .insert({ conversation_id: conversationId, user_id: targetUserId });
+// Ensure memberships exist. If your conversation_members table has a unique
+// constraint on (conversation_id, user_id) this stays idempotent.
+const { error: memInsertErr } = await supabase
+  .from('conversation_members')
+  .insert([
+    { conversation_id: conversationId, user_id: me.id },
+    { conversation_id: conversationId, user_id: otherUserId },
+  ]);
 
-    if (memberErr) {
-      const msg = (memberErr as any)?.message ?? '';
-      const code = (memberErr as any)?.code ?? '';
-      const lower = msg.toLowerCase();
-      const isDuplicate =
-        String(code) === '23505' ||
-        lower.includes('duplicate') ||
-        lower.includes('unique');
-      if (!isDuplicate) throw memberErr;
-    }
-  };
+if (memInsertErr) {
+  const msg = (memInsertErr as any)?.message ?? '';
+  const code = (memInsertErr as any)?.code ?? '';
 
-  await ensureMembership(me.id);
-  await ensureMembership(otherUserId);
+  // Ignore unique violation (already inserted)
+  const isDuplicate =
+    String(code) === '23505' ||
+    msg.toLowerCase().includes('duplicate') ||
+    msg.toLowerCase().includes('unique');
+
+  if (!isDuplicate) throw memInsertErr;
+}
 
   return conversationId;
 }

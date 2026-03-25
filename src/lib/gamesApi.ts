@@ -339,14 +339,6 @@ export async function setRunsStarted(gameId: string, runsStarted: boolean): Prom
 }
 
 export async function endGame(gameId: string): Promise<Game> {
-  const { data: rpcData, error: rpcErr } = await supabase
-    .rpc('end_game_session', { p_game_id: gameId })
-    .single();
-
-  if (!rpcErr && rpcData) {
-    return await hydrateGame(rowToGame(rpcData as GameRow));
-  }
-
   const { data, error } = await supabase
     .from('games')
     .update({ status: 'finished', ended_at: new Date().toISOString(), runs_started: false })
@@ -354,7 +346,7 @@ export async function endGame(gameId: string): Promise<Game> {
     .select('*')
     .single();
 
-  if (error) throw rpcErr ?? error;
+  if (error) throw error;
   return await hydrateGame(rowToGame(data as GameRow));
 }
 
@@ -459,17 +451,8 @@ export async function submitPostGameVotes(
     nextVoters[voterId][v.category] = v.votedUserId;
   }
 
-  // Prefer RPC first so any checked-in participant can submit votes even when table RLS only
-  // allows the host to update the raw games row.
-  const { data: rpcData, error: rpcErr } = await supabase
-    .rpc('submit_post_game_votes', { p_game_id: gameId, p_votes: nextVotes, p_voters: nextVoters })
-    .single();
-
-  if (!rpcErr && rpcData) {
-    // @ts-ignore
-    return await hydrateGame(rowToGame(rpcData as GameRow));
-  }
-
+  // Prefer direct update (works if RLS allows participants). If it fails, fall back to an RPC
+  // (installable via supabase_sql_updates.sql).
   const { data, error } = await supabase
     .from('games')
     .update({ post_game_votes: nextVotes, post_game_voters: nextVoters })
@@ -477,7 +460,16 @@ export async function submitPostGameVotes(
     .select('*')
     .single();
 
-  if (error) throw rpcErr ?? error;
+  if (!error && data) {
+    // @ts-ignore
+    return await hydrateGame(rowToGame(data as GameRow));
+  }
+
+  const { data: rpcData, error: rpcErr } = await supabase
+    .rpc('submit_post_game_votes', { p_game_id: gameId, p_votes: nextVotes, p_voters: nextVoters })
+    .single();
+
+  if (rpcErr) throw error ?? rpcErr;
   // @ts-ignore
-  return await hydrateGame(rowToGame(data as GameRow));
+  return await hydrateGame(rowToGame(rpcData as GameRow));
 }

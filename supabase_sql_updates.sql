@@ -1,19 +1,22 @@
--- SpotUp Supabase SQL updates - Step 2 safe patch
--- Tailored to the current schema described in this conversation.
--- This script avoids unsupported CREATE POLICY IF NOT EXISTS syntax.
+-- SpotUp Supabase SQL updates
+-- Run this in Supabase SQL editor.
+-- Notes:
+-- 1) These functions are optional but recommended. The app includes client-side fallbacks where possible.
+-- 2) Adjust policies to match your security needs.
 
 -- -----------------------------------------------------------------------------
--- STEP 2: additional schema needed for timed session XP + daily login bonus
+-- PROFILES: progression + reliability columns
 -- -----------------------------------------------------------------------------
 alter table if exists public.profiles
-  add column if not exists last_login_bonus_at timestamptz;
+  add column if not exists xp integer not null default 0,
+  add column if not exists show_ups integer not null default 0,
+  add column if not exists cancellations integer not null default 0,
+  add column if not exists no_shows integer not null default 0,
+  add column if not exists reliability_score integer not null default 100;
 
-alter table if exists public.games
-  add column if not exists checked_in_at jsonb not null default '{}'::jsonb;
-
--- -----------------------------------------------------------------------------
--- Public profile lookup used by messaging / social features
--- -----------------------------------------------------------------------------
+-- Public profile lookup for messaging (username + photo only).
+-- This avoids needing a wide-open SELECT policy on profiles while still letting users see
+-- who they are messaging.
 create or replace function public.get_public_profiles(p_user_ids uuid[])
 returns table (
   id uuid,
@@ -33,92 +36,28 @@ $$;
 grant execute on function public.get_public_profiles(uuid[]) to authenticated;
 
 -- -----------------------------------------------------------------------------
--- Safe XP helper for the existing xp_events table shape
--- Assumes xp_events(user_id uuid, xp integer, event_key text, created_at timestamptz)
+-- XP EVENTS (idempotent awarding)
 -- -----------------------------------------------------------------------------
-create or replace function public.add_xp(
-  p_user_id uuid,
-  p_xp integer,
-  p_event_key text
-)
-returns integer
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_current integer;
-begin
-  if p_user_id is null then
-    raise exception 'User is required';
-  end if;
+create table if not exists public.xp_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  event_type text not null,
+  game_id uuid null,
+  points integer not null,
+  created_at timestamptz not null default now(),
+  unique (user_id, event_type, game_id)
+);
 
-  if exists (
-    select 1
-    from public.xp_events xe
-    where xe.user_id = p_user_id
-      and xe.event_key = p_event_key
-  ) then
-    return (select coalesce(xp, 0) from public.profiles where id = p_user_id);
-  end if;
+alter table public.xp_events enable row level security;
 
-  insert into public.xp_events (user_id, xp, event_key)
-  values (p_user_id, p_xp, p_event_key);
+-- Users can insert their own XP events only via RPC.
+-- Allow select on own rows (optional).
+create policy if not exists "xp_events_select_own"
+on public.xp_events
+for select
+using (auth.uid() = user_id);
 
-  update public.profiles
-  set xp = coalesce(xp, 0) + p_xp
-  where id = p_user_id
-  returning xp into v_current;
-
-  return coalesce(v_current, 0);
-end;
-$$;
-
-grant execute on function public.add_xp(uuid, integer, text) to authenticated;
-
--- -----------------------------------------------------------------------------
--- Daily login bonus: +5 XP once per reset window when reliability > 90
--- Reset window uses 3 AM America/Los_Angeles.
--- -----------------------------------------------------------------------------
-create or replace function public.claim_daily_login_bonus()
-returns integer
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_user uuid := auth.uid();
-  v_reliability integer := 0;
-  v_reset_day date;
-  v_event_key text;
-begin
-  if v_user is null then
-    raise exception 'Not authenticated';
-  end if;
-
-  select coalesce(reliability_score, 100)
-    into v_reliability
-  from public.profiles
-  where id = v_user;
-
-  if v_reliability <= 90 then
-    return (select coalesce(xp, 0) from public.profiles where id = v_user);
-  end if;
-
-  v_reset_day := date(timezone('America/Los_Angeles', now() - interval '3 hours'));
-  v_event_key := 'daily_login_' || v_reset_day::text;
-
-  return public.add_xp(v_user, 5, v_event_key);
-end;
-$$;
-
-grant execute on function public.claim_daily_login_bonus() to authenticated;
-
--- -----------------------------------------------------------------------------
--- Step 1 compatible award_xp helper used by the frontend
--- host_game = 30
--- check_in = 20
--- -----------------------------------------------------------------------------
+-- Award XP (idempotent)
 create or replace function public.award_xp(p_event_type text, p_game_id uuid default null)
 returns integer
 language plpgsql
@@ -127,86 +66,64 @@ set search_path = public
 as $$
 declare
   v_user uuid := auth.uid();
-  v_points integer := 0;
-  v_event_key text;
+  v_points integer;
 begin
   if v_user is null then
     raise exception 'Not authenticated';
   end if;
 
+  -- Point values (tweak freely)
   v_points := case p_event_type
     when 'host_game' then 30
     when 'check_in' then 20
+    when 'received_vote' then 15
     else 0
   end;
 
   if v_points <= 0 then
-    return (select coalesce(xp, 0) from public.profiles where id = v_user);
+    return (select xp from public.profiles where id = v_user);
   end if;
 
-  v_event_key := p_event_type || '_' || coalesce(p_game_id::text, 'global');
-  return public.add_xp(v_user, v_points, v_event_key);
+  insert into public.xp_events(user_id, event_type, game_id, points)
+  values (v_user, p_event_type, p_game_id, v_points)
+  on conflict do nothing;
+
+  -- Only increment if we actually inserted (found in rowcount)
+  if found then
+    update public.profiles
+      set xp = coalesce(xp,0) + v_points
+      where id = v_user;
+  end if;
+
+  return (select xp from public.profiles where id = v_user);
 end;
 $$;
 
-grant execute on function public.award_xp(text, uuid) to authenticated;
-
 -- -----------------------------------------------------------------------------
--- Check-in handling with timestamp tracking.
--- Keeps existing checked_in_ids behavior and awards the +20 check-in XP once.
+-- GAME REQUESTS: host approves/denies pending requests
 -- -----------------------------------------------------------------------------
-create or replace function public.toggle_check_in(p_game_id uuid, p_checked_in boolean)
+create or replace function public.approve_game_request(p_game_id uuid, p_user_id uuid)
 returns public.games
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_me uuid := auth.uid();
   v_game public.games;
-  v_ids uuid[];
-  v_times jsonb;
+  v_host uuid := auth.uid();
 begin
-  if v_me is null then
-    raise exception 'Not authenticated';
-  end if;
+  if v_host is null then raise exception 'Not authenticated'; end if;
 
-  select * into v_game
-  from public.games
-  where id = p_game_id;
-
-  if v_game is null then
-    raise exception 'Game not found';
-  end if;
-
-  if not (v_me = v_game.host_id or v_me = any(coalesce(v_game.player_ids, '{}'::uuid[]))) then
-    raise exception 'Not allowed';
-  end if;
-
-  v_ids := coalesce(v_game.checked_in_ids, '{}'::uuid[]);
-  v_times := coalesce(v_game.checked_in_at, '{}'::jsonb);
-
-  if p_checked_in then
-    if not (v_me = any(v_ids)) then
-      v_ids := array_append(v_ids, v_me);
-    end if;
-
-    if not (v_times ? v_me::text) then
-      v_times := jsonb_set(v_times, array[v_me::text], to_jsonb(now()), true);
-      perform public.add_xp(v_me, 20, 'checkin_' || p_game_id::text || '_' || v_me::text);
-
-      update public.profiles
-      set show_ups = coalesce(show_ups, 0) + 1
-      where id = v_me;
-    end if;
-  else
-    v_ids := array_remove(v_ids, v_me);
-    v_times := v_times - v_me::text;
-  end if;
+  select * into v_game from public.games where id = p_game_id;
+  if v_game is null then raise exception 'Game not found'; end if;
+  if v_game.host_id <> v_host then raise exception 'Only host can approve'; end if;
 
   update public.games
-  set checked_in_ids = v_ids,
-      checked_in_at = v_times
+  set pending_request_ids = array_remove(coalesce(pending_request_ids,'{}'::uuid[]), p_user_id),
+      player_ids = case
+        when p_user_id = any(coalesce(player_ids,'{}'::uuid[])) then player_ids
+        else array_append(coalesce(player_ids,'{}'::uuid[]), p_user_id)
+      end
   where id = p_game_id
   returning * into v_game;
 
@@ -214,82 +131,69 @@ begin
 end;
 $$;
 
-grant execute on function public.toggle_check_in(uuid, boolean) to authenticated;
-
--- -----------------------------------------------------------------------------
--- End game + timed session XP.
--- +5 XP per 30 minutes checked in, capped at 120 minutes (+20 XP max)
--- host gets +1 XP per checked-in player
--- -----------------------------------------------------------------------------
-create or replace function public.end_game_session(p_game_id uuid)
+create or replace function public.reject_game_request(p_game_id uuid, p_user_id uuid)
 returns public.games
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_me uuid := auth.uid();
   v_game public.games;
-  v_player uuid;
-  v_start timestamptz;
-  v_minutes integer;
-  v_bonus integer;
-  v_checked_count integer;
+  v_host uuid := auth.uid();
 begin
-  if v_me is null then
-    raise exception 'Not authenticated';
-  end if;
+  if v_host is null then raise exception 'Not authenticated'; end if;
 
-  select * into v_game
-  from public.games
-  where id = p_game_id;
-
-  if v_game is null then
-    raise exception 'Game not found';
-  end if;
-
-  if v_game.host_id <> v_me then
-    raise exception 'Only host can end the game';
-  end if;
+  select * into v_game from public.games where id = p_game_id;
+  if v_game is null then raise exception 'Game not found'; end if;
+  if v_game.host_id <> v_host then raise exception 'Only host can reject'; end if;
 
   update public.games
-  set status = 'finished',
-      ended_at = coalesce(ended_at, now()),
-      runs_started = false
+  set pending_request_ids = array_remove(coalesce(pending_request_ids,'{}'::uuid[]), p_user_id)
   where id = p_game_id
   returning * into v_game;
-
-  v_checked_count := coalesce(array_length(v_game.checked_in_ids, 1), 0);
-  perform public.add_xp(v_game.host_id, v_checked_count, 'host_checked_in_bonus_' || p_game_id::text);
-
-  foreach v_player in array coalesce(v_game.checked_in_ids, '{}'::uuid[])
-  loop
-    begin
-      v_start := nullif(v_game.checked_in_at ->> v_player::text, '')::timestamptz;
-    exception when others then
-      v_start := null;
-    end;
-
-    if v_start is null then
-      continue;
-    end if;
-
-    v_minutes := greatest(floor(extract(epoch from (coalesce(v_game.ended_at, now()) - v_start)) / 60)::integer, 0);
-    v_bonus := least(4, floor(v_minutes / 30)::integer) * 5;
-
-    if v_bonus > 0 then
-      perform public.add_xp(v_player, v_bonus, 'session_time_' || p_game_id::text || '_' || v_player::text);
-    end if;
-  end loop;
 
   return v_game;
 end;
 $$;
 
-grant execute on function public.end_game_session(uuid) to authenticated;
+-- -----------------------------------------------------------------------------
+-- POSTGAME VOTES: allow any participant to submit
+-- -----------------------------------------------------------------------------
+create or replace function public.submit_post_game_votes(p_game_id uuid, p_votes jsonb, p_voter_id uuid)
+returns public.games
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game public.games;
+  v_me uuid := auth.uid();
+begin
+  if v_me is null then raise exception 'Not authenticated'; end if;
+  if p_voter_id <> v_me then raise exception 'Invalid voter'; end if;
+
+  select * into v_game from public.games where id = p_game_id;
+  if v_game is null then raise exception 'Game not found'; end if;
+
+  if not (v_me = any(coalesce(v_game.player_ids,'{}'::uuid[])) or v_me = v_game.host_id) then
+    raise exception 'Not a participant';
+  end if;
+
+  update public.games
+  set post_game_votes = p_votes,
+      post_game_voters = case
+        when v_me = any(coalesce(post_game_voters,'{}'::uuid[])) then post_game_voters
+        else array_append(coalesce(post_game_voters,'{}'::uuid[]), v_me)
+      end
+  where id = p_game_id
+  returning * into v_game;
+
+  return v_game;
+end;
+$$;
 
 -- -----------------------------------------------------------------------------
--- Reliable no-show report
+-- RELIABILITY: host reports a no-show
 -- -----------------------------------------------------------------------------
 create table if not exists public.no_show_reports (
   id uuid primary key default gen_random_uuid(),
@@ -302,13 +206,13 @@ create table if not exists public.no_show_reports (
 
 alter table public.no_show_reports enable row level security;
 
-drop policy if exists "no_show_reports_select_own" on public.no_show_reports;
-create policy "no_show_reports_select_own"
+-- Only allow reading own reports (optional)
+create policy if not exists "no_show_reports_select_own"
 on public.no_show_reports
 for select
 using (auth.uid() = reported_user_id or auth.uid() = reporter_user_id);
 
-create or replace function public.report_no_show(p_game_id uuid, p_user_id uuid)
+create or replace function public.report_no_show(p_game_id uuid, p_reported_user uuid)
 returns void
 language plpgsql
 security definer
@@ -323,33 +227,31 @@ declare
   v_total integer;
   v_score integer;
 begin
-  if v_me is null then
-    raise exception 'Not authenticated';
-  end if;
+  if v_me is null then raise exception 'Not authenticated'; end if;
 
   select * into v_game from public.games where id = p_game_id;
   if v_game is null then raise exception 'Game not found'; end if;
   if v_game.host_id <> v_me then raise exception 'Only host can report'; end if;
-  if not (p_user_id = any(coalesce(v_game.player_ids, '{}'::uuid[]))) then
+  if not (p_reported_user = any(coalesce(v_game.player_ids,'{}'::uuid[]))) then
     raise exception 'User is not signed up for this game';
   end if;
 
+  -- Idempotent report per (game, user)
   insert into public.no_show_reports(game_id, reported_user_id, reporter_user_id)
-  values (p_game_id, p_user_id, v_me)
+  values (p_game_id, p_reported_user, v_me)
   on conflict do nothing;
 
   if found then
-    perform public.add_xp(p_user_id, -25, 'no_show_' || p_game_id::text || '_' || p_user_id::text);
-
     update public.profiles
-      set no_shows = coalesce(no_shows, 0) + 1
-      where id = p_user_id;
+      set no_shows = coalesce(no_shows,0) + 1,
+          xp = greatest(coalesce(xp,0) - 25, 0)
+      where id = p_reported_user;
   end if;
 
   select coalesce(show_ups,0), coalesce(cancellations,0), coalesce(no_shows,0)
     into v_show_ups, v_cancels, v_noshows
     from public.profiles
-    where id = p_user_id;
+    where id = p_reported_user;
 
   v_total := v_show_ups + v_cancels + v_noshows;
   if v_total <= 0 then
@@ -360,37 +262,138 @@ begin
 
   update public.profiles
     set reliability_score = v_score
-    where id = p_user_id;
+    where id = p_reported_user;
 end;
 $$;
 
-grant execute on function public.report_no_show(uuid, uuid) to authenticated;
+-- -----------------------------------------------------------------------------
+-- MESSAGING: prevent duplicate direct chats + support game invites
+-- -----------------------------------------------------------------------------
 
--- -----------------------------------------------------------------------------
--- Direct chat creation helper compatibility.
--- -----------------------------------------------------------------------------
+-- Conversations: store the normalized (user1_id, user2_id) pair for 1:1 DMs.
 alter table if exists public.conversations
   add column if not exists user1_id uuid references auth.users(id) on delete cascade,
   add column if not exists user2_id uuid references auth.users(id) on delete cascade,
   add column if not exists created_at timestamptz not null default now();
 
--- If you later confirm there are no duplicate direct conversations, you can add a
--- unique index on (user1_id, user2_id). This patch leaves it out to avoid failures on
--- projects that already have duplicate rows.
+create unique index if not exists conversations_direct_pair_unique
+  on public.conversations (user1_id, user2_id)
+  where user1_id is not null and user2_id is not null;
+
+-- Conversation members: ensure no duplicate memberships.
+alter table if exists public.conversation_members
+  add constraint if not exists conversation_members_unique unique (conversation_id, user_id);
+
+-- Messages: type + meta payload for things like game invites.
+alter table if exists public.messages
+  add column if not exists type text not null default 'text',
+  add column if not exists meta jsonb;
+
+alter table if exists public.messages
+  add constraint if not exists messages_type_check check (type in ('text','game_invite'));
+
+-- Backfill user1_id/user2_id for existing 1:1 conversations (based on conversation_members).
+with pairs as (
+  select conversation_id,
+         min(user_id) as u1,
+         max(user_id) as u2
+  from public.conversation_members
+  group by conversation_id
+  having count(*) = 2
+)
+update public.conversations c
+set user1_id = p.u1,
+    user2_id = p.u2
+from pairs p
+where c.id = p.conversation_id
+  and (c.user1_id is null or c.user2_id is null);
+
+-- OPTIONAL CLEANUP: delete duplicate direct conversations, keeping the oldest one.
+-- This clears duplicate rows that were created before the unique index existed.
+-- Run once, then keep the unique index.
+with pair_convs as (
+  select c.id, c.created_at, c.user1_id, c.user2_id
+  from public.conversations c
+  where c.user1_id is not null and c.user2_id is not null
+), ranked as (
+  select *, row_number() over (partition by user1_id, user2_id order by created_at asc, id asc) as rn
+  from pair_convs
+), dupe_ids as (
+  select id from ranked where rn > 1
+)
+delete from public.messages where conversation_id in (select id from dupe_ids);
+
+with dupe_ids as (
+  select id
+  from (
+    select c.id, row_number() over (partition by c.user1_id, c.user2_id order by c.created_at asc, c.id asc) as rn
+    from public.conversations c
+    where c.user1_id is not null and c.user2_id is not null
+  ) x
+  where rn > 1
+)
+delete from public.conversation_members where conversation_id in (select id from dupe_ids);
+
+with dupe_ids as (
+  select id
+  from (
+    select c.id, row_number() over (partition by c.user1_id, c.user2_id order by c.created_at asc, c.id asc) as rn
+    from public.conversations c
+    where c.user1_id is not null and c.user2_id is not null
+  ) x
+  where rn > 1
+)
+delete from public.conversations where id in (select id from dupe_ids);
+
+-- OPTIONAL NUCLEAR RESET (dev only): clears all messaging.
+-- truncate table public.messages, public.conversation_members, public.conversations, public.message_requests;
+
 
 -- -----------------------------------------------------------------------------
--- Post-game votes: allow any participant to submit through RPC.
--- Stores the merged vote aggregates and voter ledger.
+-- NOTIFICATIONS: RLS + policies (required for app Notifications + realtime)
 -- -----------------------------------------------------------------------------
-create or replace function public.submit_post_game_votes(p_game_id uuid, p_votes jsonb, p_voters jsonb)
+alter table if exists public.notifications enable row level security;
+
+-- Read only your own notifications
+create policy if not exists "notifications_select_own"
+on public.notifications
+for select
+using (auth.uid() = user_id);
+
+-- Allow authenticated users to create notifications (recommended).
+-- If you want tighter control, replace this with SECURITY DEFINER RPCs.
+create policy if not exists "notifications_insert_authenticated"
+on public.notifications
+for insert
+to authenticated
+with check (auth.uid() is not null);
+
+-- Allow users to mark their own notifications as read / delete their own notifications
+create policy if not exists "notifications_update_own"
+on public.notifications
+for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy if not exists "notifications_delete_own"
+on public.notifications
+for delete
+using (auth.uid() = user_id);
+
+-- -----------------------------------------------------------------------------
+-- GAME INVITES: accept private invite when inviter is host
+-- -----------------------------------------------------------------------------
+create or replace function public.accept_game_invite(p_game_id uuid, p_inviter_user_id uuid)
 returns public.games
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_game public.games;
   v_me uuid := auth.uid();
+  v_game public.games;
+  v_players uuid[];
+  v_pending uuid[];
 begin
   if v_me is null then
     raise exception 'Not authenticated';
@@ -401,29 +404,35 @@ begin
     raise exception 'Game not found';
   end if;
 
-  if not (
-    v_me = v_game.host_id
-    or v_me = any(coalesce(v_game.player_ids, '{}'::uuid[]))
-    or v_me = any(coalesce(v_game.checked_in_ids, '{}'::uuid[]))
-  ) then
-    raise exception 'Not a participant';
+  -- If inviter is the host, allow direct join even for private games.
+  if v_game.host_id = p_inviter_user_id then
+    v_players := coalesce(v_game.player_ids, '{}'::uuid[]);
+    if not (v_me = any(v_players)) then
+      v_players := array_append(v_players, v_me);
+    end if;
+
+    v_pending := coalesce(v_game.pending_request_ids, '{}'::uuid[]);
+    -- Remove from pending if present
+    v_pending := array_remove(v_pending, v_me);
+
+    update public.games
+      set player_ids = v_players,
+          pending_request_ids = v_pending
+      where id = p_game_id
+      returning * into v_game;
+
+    return v_game;
   end if;
 
-  update public.games
-  set post_game_votes = coalesce(p_votes, '{}'::jsonb),
-      post_game_voters = coalesce(p_voters, '{}'::jsonb)
-  where id = p_game_id
-  returning * into v_game;
-
-  return v_game;
+  -- Otherwise behave like a normal join (public joins, private requests)
+  return (select * from public.join_or_request_game(p_game_id));
 end;
 $$;
 
-grant execute on function public.submit_post_game_votes(uuid, jsonb, jsonb) to authenticated;
+grant execute on function public.accept_game_invite(uuid, uuid) to authenticated;
 
--- -----------------------------------------------------------------------------
--- Vote recipient XP: +15 each, capped at +40 per session.
--- -----------------------------------------------------------------------------
+
+-- Award XP to vote recipients with a +40 XP per-session cap from received votes.
 create or replace function public.award_received_votes(p_game_id uuid, p_votes jsonb)
 returns void
 language plpgsql
@@ -434,9 +443,10 @@ declare
   v_me uuid := auth.uid();
   v_vote jsonb;
   v_user uuid;
+  v_category text;
   v_existing integer;
   v_award integer;
-  v_event_key text;
+  v_event_type text;
 begin
   if v_me is null then
     raise exception 'Not authenticated';
@@ -445,25 +455,40 @@ begin
   for v_vote in select * from jsonb_array_elements(coalesce(p_votes, '[]'::jsonb))
   loop
     v_user := nullif(v_vote->>'votedUserId', '')::uuid;
+    v_category := coalesce(v_vote->>'category', '');
 
-    if v_user is null or v_user = v_me then
+    if v_user is null or v_category = '' or v_user = v_me then
       continue;
     end if;
 
-    select coalesce(sum(xp), 0)
+    select coalesce(sum(points), 0)
       into v_existing
     from public.xp_events
     where user_id = v_user
-      and event_key like ('received_vote_' || p_game_id::text || '_%');
+      and game_id = p_game_id
+      and event_type like 'received_vote_%';
 
     v_award := greatest(least(40 - v_existing, 15), 0);
-    v_event_key := 'received_vote_' || p_game_id::text || '_' || gen_random_uuid()::text;
+    v_event_type := 'received_vote_' || v_category;
 
     if v_award > 0 then
-      perform public.add_xp(v_user, v_award, v_event_key);
+      insert into public.xp_events(user_id, event_type, game_id, points)
+      values (v_user, v_event_type, p_game_id, v_award)
+      on conflict do nothing;
+
+      if found then
+        update public.profiles
+          set xp = coalesce(xp, 0) + v_award
+          where id = v_user;
+      end if;
     end if;
   end loop;
 end;
 $$;
 
-grant execute on function public.award_received_votes(uuid, jsonb) to authenticated;
+
+-- Note: recommended game economy values for this build
+-- host_game = 30 XP
+-- check_in = 20 XP
+-- received_vote = 15 XP each, capped at +40 per session
+-- no-show penalty = -25 XP

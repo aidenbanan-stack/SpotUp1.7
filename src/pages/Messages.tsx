@@ -173,49 +173,7 @@ export default function Messages() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, mode, activeConv?.id]);
 
-  // Poll as a safety net so active chats update even when realtime is unavailable.
-  useEffect(() => {
-    if (!user || mode !== 'chat' || !activeConv) return;
-
-    const interval = window.setInterval(() => {
-      void fetchMessages(activeConv.id)
-        .then((msgs) => {
-          setMessages((prev) => {
-            if (prev.length === msgs.length) return prev;
-            return msgs;
-          });
-        })
-        .catch(() => undefined);
-    }, 2500);
-
-    return () => window.clearInterval(interval);
-  }, [user?.id, mode, activeConv?.id]);
-
-  // Refresh conversation list and pending requests periodically while on the inbox screen.
-  useEffect(() => {
-    if (!user || mode !== 'list') return;
-
-    const interval = window.setInterval(() => {
-      void Promise.all([
-        fetchMyConversations().catch(() => []),
-        fetchMyMessageRequests().catch(() => []),
-      ]).then(([convs, reqs]) => {
-        setConversations(
-          [...convs].sort((a, b) => {
-            const ta = a.lastMessage?.createdAt ? +new Date(a.lastMessage.createdAt) : 0;
-            const tb = b.lastMessage?.createdAt ? +new Date(b.lastMessage.createdAt) : 0;
-            return tb - ta;
-          })
-        );
-        setRequests(reqs.filter((r) => r.status === 'pending'));
-      });
-    }, 5000);
-
-    return () => window.clearInterval(interval);
-  }, [user?.id, mode]);
-
   const handleSend = async () => {
-
     if (!activeConv) return;
     const text = draft.trim();
     if (!text) return;

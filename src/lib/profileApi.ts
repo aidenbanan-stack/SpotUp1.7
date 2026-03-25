@@ -86,44 +86,6 @@ function profileToUser(row: ProfileRow): User {
   };
 }
 
-
-
-async function fetchVoteCountsForUser(userId: string): Promise<Partial<Record<string, number>>> {
-  const { data, error } = await supabase
-    .from('games')
-    .select('post_game_votes')
-    .not('post_game_votes', 'is', null);
-
-  if (error) return {};
-
-  const totals: Record<string, number> = {};
-  for (const row of data ?? []) {
-    const votes = (row as any)?.post_game_votes ?? {};
-    if (!votes || typeof votes !== 'object') continue;
-    for (const [category, bucket] of Object.entries(votes as Record<string, any>)) {
-      if (!bucket || typeof bucket !== 'object') continue;
-      const raw = (bucket as Record<string, any>)[userId];
-      const count = typeof raw === 'number' ? raw : Number(raw ?? 0);
-      if (Number.isFinite(count) && count > 0) {
-        totals[category] = (totals[category] ?? 0) + count;
-      }
-    }
-  }
-
-  totals.mostDominant = totals['most_dominant'] ?? 0;
-  totals.winner = totals['winner'] ?? 0;
-  totals.bestTeammate = totals['best_teammate'] ?? 0;
-  return totals;
-}
-
-async function enrichUserVotes(user: User): Promise<User> {
-  try {
-    const votesReceived = await fetchVoteCountsForUser(user.id);
-    return { ...user, votesReceived };
-  } catch {
-    return user;
-  }
-}
 function publicProfileToUser(row: PublicProfileRow): User {
   const username = row.username ?? 'player';
   const photo =
@@ -190,7 +152,7 @@ export async function getOrCreateMyProfile(): Promise<User> {
     .maybeSingle();
 
   if (selErr) throw selErr;
-  if (existing) return await enrichUserVotes(profileToUser(existing as ProfileRow));
+  if (existing) return profileToUser(existing as ProfileRow);
 
   const insert: Partial<ProfileRow> = {
     id: me.id,
@@ -209,7 +171,7 @@ export async function getOrCreateMyProfile(): Promise<User> {
     .single();
 
   if (insErr) throw insErr;
-  return await enrichUserVotes(profileToUser(created as ProfileRow));
+  return profileToUser(created as ProfileRow);
 }
 
 /**
@@ -228,7 +190,7 @@ export async function fetchProfileById(id: string): Promise<User | null> {
 
   console.log('[fetchProfileById] direct data:', data, 'error:', error);
 
-  if (data) return await enrichUserVotes(profileToUser(data as ProfileRow));
+  if (data) return profileToUser(data as ProfileRow);
 
   // Always try RPC if direct didn't return data (even if error is null)
   const { data: rpcData, error: rpcError } = await supabase.rpc('get_public_profiles', {
@@ -240,7 +202,7 @@ export async function fetchProfileById(id: string): Promise<User | null> {
   if (rpcError) return null;
 
   const row = (rpcData?.[0] ?? null) as any;
-  return row ? await enrichUserVotes(publicProfileToUser(row as PublicProfileRow)) : null;
+  return row ? publicProfileToUser(row as PublicProfileRow) : null;
 }
 
 /**
