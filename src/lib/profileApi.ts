@@ -81,7 +81,7 @@ function profileToUser(row: ProfileRow): User {
       noShows: row.no_shows ?? 0,
       score: row.reliability_score ?? 100,
     },
-    votesReceived: { bestScorer: 0, bestDefender: 0, bestTeammate: 0 },
+    votesReceived: { mostDominant: 0, winner: 0, bestTeammate: 0 },
     uniqueCourtsPlayed: 0,
   };
 }
@@ -109,7 +109,7 @@ function publicProfileToUser(row: PublicProfileRow): User {
     level: levelFromXP(row.xp ?? 0),
     badges: [],
     reliabilityStats: { showUps: 0, cancellations: 0, noShows: 0, score: 100 },
-    votesReceived: { bestScorer: 0, bestDefender: 0, bestTeammate: 0 },
+    votesReceived: { mostDominant: 0, winner: 0, bestTeammate: 0 },
     uniqueCourtsPlayed: 0,
   };
 }

@@ -10,8 +10,7 @@ import { toast } from 'sonner';
 import { createNotification } from '@/lib/notificationsApi';
 import { cn } from '@/lib/utils';
 import { approveJoinRequest, deleteGame, joinGame, leaveGame, rejectJoinRequest, setGameStatus } from '@/lib/gamesApi';
-import { fetchProfilesByIds, getOrCreateMyProfile } from '@/lib/profileApi';
-import { awardXp } from '@/lib/xpApi';
+import { fetchProfilesByIds } from '@/lib/profileApi';
 import { fetchMyFriends } from '@/lib/socialApi';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -19,7 +18,7 @@ import { Input } from '@/components/ui/input';
 export default function GameDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { games, setGames, user, setUser } = useApp();
+  const { games, setGames, user } = useApp();
 
   const [pendingProfiles, setPendingProfiles] = useState<any[]>([]);
   const [pendingBusy, setPendingBusy] = useState<string | null>(null);
@@ -139,17 +138,7 @@ export default function GameDetail() {
     try {
       const updated = await joinGame(game.id, user.id, game.isPrivate);
       setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
-      toast.success(game.isPrivate ? 'Join request sent! Waiting for host approval.' : 'You have joined the game!');
-
-      // XP: joining (or requesting) a game
-      try {
-        await awardXp('join_game', game.id);
-        const refreshed = await getOrCreateMyProfile();
-        setUser(refreshed);
-      } catch {
-        // Non-blocking
-      }
-    } catch (err) {
+      toast.success(game.isPrivate ? 'Join request sent! Waiting for host approval.' : 'You have joined the game!');    } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to join game.';
       toast.error(message);
     }

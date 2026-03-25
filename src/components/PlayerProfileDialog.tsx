@@ -156,8 +156,8 @@ export default function PlayerProfileDialog({ open, onOpenChange, userId }: Prop
             <div className="glass-card p-4 space-y-2">
               <div className="text-xs uppercase tracking-wide text-muted-foreground">Post-game votes</div>
               <div className="grid grid-cols-3 gap-2">
-                <StatPill label="Best Scorer" value={profile.votesReceived?.bestScorer ?? 0} />
-                <StatPill label="Best Defender" value={profile.votesReceived?.bestDefender ?? 0} />
+                <StatPill label="Most Dominant" value={profile.votesReceived?.mostDominant ?? 0} />
+                <StatPill label="Winner" value={profile.votesReceived?.winner ?? 0} />
                 <StatPill label="Best Teammate" value={profile.votesReceived?.bestTeammate ?? 0} />
               </div>
             </div>

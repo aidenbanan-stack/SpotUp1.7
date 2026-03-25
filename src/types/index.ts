@@ -10,7 +10,7 @@ export type Sport =
 export type SkillLevel = 'beginner' | 'intermediate' | 'advanced' | 'elite';
 
 // Gamification Types
-export type PlayerLevel = 'rookie' | 'regular' | 'hooper' | 'vet' | 'court_legend';
+export type PlayerLevel = 'rookie' | 'regular' | 'competitor' | 'playmaker' | 'all_star' | 'elite' | 'legend';
 
 export interface PlayerLevelInfo {
   id: PlayerLevel;
@@ -28,12 +28,58 @@ export interface Badge {
   category: 'play' | 'host' | 'social' | 'explorer' | 'tournament';
 }
 
+export type CorePostGameVoteCategory =
+  | 'most_dominant'
+  | 'best_teammate'
+  | 'most_clutch'
+  | 'winner'
+  | 'most_energy';
+
+export type SportSpecificPostGameVoteCategory =
+  | 'bucket_getter'
+  | 'lockdown_defender'
+  | 'floor_general'
+  | 'board_beast'
+  | 'sharpshooter'
+  | 'finisher'
+  | 'playmaker'
+  | 'wall'
+  | 'ball_winner'
+  | 'engine'
+  | 'dink_master'
+  | 'net_boss'
+  | 'rally_king'
+  | 'placement_pro'
+  | 'unshakeable'
+  | 'qb1'
+  | 'route_runner'
+  | 'hands_team'
+  | 'lockdown_db'
+  | 'big_play_threat'
+  | 'slugger'
+  | 'ace'
+  | 'gold_glove'
+  | 'spark_plug'
+  | 'closer'
+  | 'kill_leader'
+  | 'block_party'
+  | 'setter_elite'
+  | 'dig_machine'
+  | 'serve_specialist'
+  | 'handler'
+  | 'deep_threat'
+  | 'shutdown_defender'
+  | 'layout_legend'
+  | 'field_general';
+
+export type PostGameVoteCategory = CorePostGameVoteCategory | SportSpecificPostGameVoteCategory;
+
 export interface PostGameVote {
   id: string;
   gameId: string;
   voterId: string;
   votedUserId: string;
-  category: 'best_scorer' | 'best_defender' | 'best_teammate';
+  category: PostGameVoteCategory;
   createdAt: Date;
 }
 
@@ -76,8 +122,8 @@ export interface User {
   reliabilityStats: ReliabilityStats;
   hostReputation?: HostReputation;
   votesReceived: {
-    bestScorer: number;
-    bestDefender: number;
+    mostDominant: number;
+    winner: number;
     bestTeammate: number;
   };
   // Court exploration
@@ -112,7 +158,6 @@ export interface Game {
   };
   createdAt: Date;
   completedAt?: Date;
-  postGameVotes?: PostGameVote[];
 }
 
 export interface Notification {
@@ -154,14 +199,9 @@ export type CheckInStatus = 'not_started' | 'on_my_way' | 'arrived';
 
 export type GameStatus = 'scheduled' | 'live' | 'finished';
 
-export type PostGameVoteCategory =
-  | 'best_shooter'
-  | 'best_passer'
-  | 'best_all_around'
-  | 'best_scorer'
-  | 'best_defender';
 
-export type PostGameVotes = Record<PostGameVoteCategory, Record<string, number>>;
+
+export type PostGameVotes = Partial<Record<PostGameVoteCategory, Record<string, number>>>;
 export type PostGameVoters = Record<string, Partial<Record<PostGameVoteCategory, string>>>;
 
 
@@ -237,10 +277,12 @@ export const SKILL_LEVELS: { id: SkillLevel; name: string }[] = [
 
 export const PLAYER_LEVELS: PlayerLevelInfo[] = [
   { id: 'rookie', name: 'Rookie', minXP: 0, icon: '🌱' },
-  { id: 'regular', name: 'Regular', minXP: 100, icon: '⭐' },
-  { id: 'hooper', name: 'Hooper', minXP: 500, icon: '🔥' },
-  { id: 'vet', name: 'Vet', minXP: 1500, icon: '💎' },
-  { id: 'court_legend', name: 'Court Legend', minXP: 5000, icon: '👑' },
+  { id: 'regular', name: 'Regular', minXP: 500, icon: '⭐' },
+  { id: 'competitor', name: 'Competitor', minXP: 1000, icon: '🔥' },
+  { id: 'playmaker', name: 'Playmaker', minXP: 2000, icon: '🎯' },
+  { id: 'all_star', name: 'All-Star', minXP: 3000, icon: '🌟' },
+  { id: 'elite', name: 'Elite', minXP: 5000, icon: '💎' },
+  { id: 'legend', name: 'Legend', minXP: 10000, icon: '👑' },
 ];
 
 export const AVAILABLE_BADGES: Badge[] = [

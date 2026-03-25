@@ -237,12 +237,12 @@ export default function Profile() {
           </h4>
           <div className="grid grid-cols-3 gap-3 text-center">
             <div>
-              <p className="text-lg font-bold text-foreground">{user.votesReceived.bestScorer}</p>
-              <p className="text-xs text-muted-foreground">🏆 Best Scorer</p>
+              <p className="text-lg font-bold text-foreground">{user.votesReceived.mostDominant}</p>
+              <p className="text-xs text-muted-foreground">🏆 Most Dominant</p>
             </div>
             <div>
-              <p className="text-lg font-bold text-foreground">{user.votesReceived.bestDefender}</p>
-              <p className="text-xs text-muted-foreground">🛡️ Best Defender</p>
+              <p className="text-lg font-bold text-foreground">{user.votesReceived.winner}</p>
+              <p className="text-xs text-muted-foreground">🛡️ Winner</p>
             </div>
             <div>
               <p className="text-lg font-bold text-foreground">{user.votesReceived.bestTeammate}</p>

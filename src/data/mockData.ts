@@ -24,7 +24,7 @@ export const mockCurrentUser: User = {
     reliability: 94,
   },
   xp: 1250,
-  level: 'hooper',
+  level: 'competitor',
   badges: earnedBadges,
   reliabilityStats: {
     showUps: 44,
@@ -39,8 +39,8 @@ export const mockCurrentUser: User = {
     isTrustedHost: true,
   },
   votesReceived: {
-    bestScorer: 8,
-    bestDefender: 3,
+    mostDominant: 8,
+    winner: 3,
     bestTeammate: 12,
   },
   uniqueCourtsPlayed: 8,
@@ -65,7 +65,7 @@ export const mockUsers: User[] = [
       reliability: 98,
     },
     xp: 2800,
-    level: 'vet',
+    level: 'playmaker',
     badges: [earnedBadges[0], earnedBadges[1]],
     reliabilityStats: {
       showUps: 87,
@@ -80,8 +80,8 @@ export const mockUsers: User[] = [
       isTrustedHost: true,
     },
     votesReceived: {
-      bestScorer: 15,
-      bestDefender: 8,
+      mostDominant: 15,
+      winner: 8,
       bestTeammate: 20,
     },
     uniqueCourtsPlayed: 12,
@@ -103,7 +103,7 @@ export const mockUsers: User[] = [
       reliability: 91,
     },
     xp: 680,
-    level: 'hooper',
+    level: 'competitor',
     badges: [earnedBadges[0]],
     reliabilityStats: {
       showUps: 31,
@@ -118,8 +118,8 @@ export const mockUsers: User[] = [
       isTrustedHost: false,
     },
     votesReceived: {
-      bestScorer: 5,
-      bestDefender: 2,
+      mostDominant: 5,
+      winner: 2,
       bestTeammate: 8,
     },
     uniqueCourtsPlayed: 5,
@@ -141,7 +141,7 @@ export const mockUsers: User[] = [
       reliability: 96,
     },
     xp: 1800,
-    level: 'vet',
+    level: 'playmaker',
     badges: [earnedBadges[0], earnedBadges[1], earnedBadges[2]],
     reliabilityStats: {
       showUps: 62,
@@ -156,8 +156,8 @@ export const mockUsers: User[] = [
       isTrustedHost: true,
     },
     votesReceived: {
-      bestScorer: 12,
-      bestDefender: 5,
+      mostDominant: 12,
+      winner: 5,
       bestTeammate: 10,
     },
     uniqueCourtsPlayed: 10,
@@ -179,7 +179,7 @@ export const mockUsers: User[] = [
       reliability: 99,
     },
     xp: 2200,
-    level: 'vet',
+    level: 'playmaker',
     badges: [earnedBadges[0], earnedBadges[1], earnedBadges[2], earnedBadges[3]],
     reliabilityStats: {
       showUps: 71,
@@ -194,8 +194,8 @@ export const mockUsers: User[] = [
       isTrustedHost: true,
     },
     votesReceived: {
-      bestScorer: 10,
-      bestDefender: 15,
+      mostDominant: 10,
+      winner: 15,
       bestTeammate: 25,
     },
     uniqueCourtsPlayed: 15,

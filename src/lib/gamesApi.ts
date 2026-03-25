@@ -150,7 +150,7 @@ export async function createGame(input: CreateGameInput): Promise<Game> {
     checked_in_ids: input.checkedInIds ?? [],
     runs_started: input.runsStarted ?? false,
     ended_at: input.endedAt ? input.endedAt.toISOString() : null,
-    post_game_votes: input.postGameVotes ?? null,
+    post_game_votes: null,
     post_game_voters: input.postGameVoters ?? null,
     location_latitude: input.location.latitude,
     location_longitude: input.location.longitude,
@@ -361,13 +361,48 @@ export async function reportNoShow(gameId: string, reportedUserId: string): Prom
 }
 
 type PostGameVoteCategory =
-  | 'best_shooter'
-  | 'best_passer'
-  | 'best_all_around'
-  | 'best_scorer'
-  | 'best_defender';
+  | 'most_dominant'
+  | 'best_teammate'
+  | 'most_clutch'
+  | 'winner'
+  | 'most_energy'
+  | 'bucket_getter'
+  | 'lockdown_defender'
+  | 'floor_general'
+  | 'board_beast'
+  | 'sharpshooter'
+  | 'finisher'
+  | 'playmaker'
+  | 'wall'
+  | 'ball_winner'
+  | 'engine'
+  | 'dink_master'
+  | 'net_boss'
+  | 'rally_king'
+  | 'placement_pro'
+  | 'unshakeable'
+  | 'qb1'
+  | 'route_runner'
+  | 'hands_team'
+  | 'lockdown_db'
+  | 'big_play_threat'
+  | 'slugger'
+  | 'ace'
+  | 'gold_glove'
+  | 'spark_plug'
+  | 'closer'
+  | 'kill_leader'
+  | 'block_party'
+  | 'setter_elite'
+  | 'dig_machine'
+  | 'serve_specialist'
+  | 'handler'
+  | 'deep_threat'
+  | 'shutdown_defender'
+  | 'layout_legend'
+  | 'field_general';
 
-type PostGameVotes = Record<PostGameVoteCategory, Record<string, number>>;
+type PostGameVotes = Partial<Record<PostGameVoteCategory, Record<string, number>>>;
 type PostGameVoters = Record<string, Partial<Record<PostGameVoteCategory, string>>>;
 
 /**
@@ -389,13 +424,7 @@ export async function submitPostGameVotes(
   if (fetchError) throw fetchError;
 
   const currentVotes: PostGameVotes =
-    (existing?.post_game_votes as PostGameVotes) ?? {
-      best_shooter: {},
-      best_passer: {},
-      best_all_around: {},
-      best_scorer: {},
-      best_defender: {},
-    };
+    (existing?.post_game_votes as PostGameVotes) ?? {};
 
   const currentVoters: PostGameVoters = (existing?.post_game_voters as PostGameVoters) ?? {};
 

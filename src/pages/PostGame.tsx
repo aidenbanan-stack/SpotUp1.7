@@ -7,16 +7,26 @@ import { toast } from 'sonner';
 import { PostGameVoting } from '@/components/PostGameVoting';
 import { reportNoShow, submitPostGameVotes } from '@/lib/gamesApi';
 import { fetchProfilesByIds, getOrCreateMyProfile } from '@/lib/profileApi';
-import { awardXp } from '@/lib/xpApi';
+import { awardReceivedVotes } from '@/lib/xpApi';
 import type { User } from '@/types';
 
-const CATEGORY_KEYS = [
-  'best_shooter',
-  'best_passer',
-  'best_all_around',
-  'best_scorer',
-  'best_defender',
+const CORE_CATEGORY_KEYS = [
+  'most_dominant',
+  'best_teammate',
+  'most_clutch',
+  'winner',
+  'most_energy',
 ] as const;
+
+const SPORT_CATEGORY_KEYS = {
+  basketball: ['bucket_getter', 'lockdown_defender', 'floor_general', 'board_beast', 'sharpshooter'],
+  soccer: ['finisher', 'playmaker', 'wall', 'ball_winner', 'engine'],
+  pickleball: ['dink_master', 'net_boss', 'rally_king', 'placement_pro', 'unshakeable'],
+  football: ['qb1', 'route_runner', 'hands_team', 'lockdown_db', 'big_play_threat'],
+  baseball: ['slugger', 'ace', 'gold_glove', 'spark_plug', 'closer'],
+  volleyball: ['kill_leader', 'block_party', 'setter_elite', 'dig_machine', 'serve_specialist'],
+  frisbee: ['handler', 'deep_threat', 'shutdown_defender', 'layout_legend', 'field_general'],
+} as const;
 
 export default function PostGame() {
   const { id } = useParams();
@@ -62,7 +72,8 @@ export default function PostGame() {
   const hasVotedAll = useMemo(() => {
     if (!game || !user) return false;
     const rec = (game.postGameVoters && game.postGameVoters[user.id]) ? game.postGameVoters[user.id] : {};
-    return CATEGORY_KEYS.every((k) => !!rec[k]);
+    const allKeys = [...CORE_CATEGORY_KEYS, ...(SPORT_CATEGORY_KEYS[game.sport] ?? [])];
+    return allKeys.every((k) => !!rec[k]);
   }, [game, user]);
 
   const handleVoteComplete = async (votes: { category: string; votedUserId: string }[]) => {
@@ -76,9 +87,9 @@ export default function PostGame() {
       setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
       toast.success('Votes submitted.');
 
-      // XP: casting postgame votes
+      // XP: award vote recipients based on submitted votes
       try {
-        await awardXp('postgame_vote', game.id);
+        await awardReceivedVotes(game.id, votes);
         const refreshed = await getOrCreateMyProfile();
         setUser(refreshed);
       } catch {

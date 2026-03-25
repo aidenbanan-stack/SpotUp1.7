@@ -74,12 +74,9 @@ begin
 
   -- Point values (tweak freely)
   v_points := case p_event_type
-    when 'host_game' then 50
-    when 'join_game' then 10
+    when 'host_game' then 30
     when 'check_in' then 20
-    when 'finish_game' then 50
-    when 'postgame_vote' then 10
-    when 'received_vote' then 5
+    when 'received_vote' then 15
     else 0
   end;
 
@@ -246,7 +243,8 @@ begin
 
   if found then
     update public.profiles
-      set no_shows = coalesce(no_shows,0) + 1
+      set no_shows = coalesce(no_shows,0) + 1,
+          xp = greatest(coalesce(xp,0) - 25, 0)
       where id = p_reported_user;
   end if;
 
@@ -432,3 +430,65 @@ end;
 $$;
 
 grant execute on function public.accept_game_invite(uuid, uuid) to authenticated;
+
+
+-- Award XP to vote recipients with a +40 XP per-session cap from received votes.
+create or replace function public.award_received_votes(p_game_id uuid, p_votes jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_me uuid := auth.uid();
+  v_vote jsonb;
+  v_user uuid;
+  v_category text;
+  v_existing integer;
+  v_award integer;
+  v_event_type text;
+begin
+  if v_me is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  for v_vote in select * from jsonb_array_elements(coalesce(p_votes, '[]'::jsonb))
+  loop
+    v_user := nullif(v_vote->>'votedUserId', '')::uuid;
+    v_category := coalesce(v_vote->>'category', '');
+
+    if v_user is null or v_category = '' or v_user = v_me then
+      continue;
+    end if;
+
+    select coalesce(sum(points), 0)
+      into v_existing
+    from public.xp_events
+    where user_id = v_user
+      and game_id = p_game_id
+      and event_type like 'received_vote_%';
+
+    v_award := greatest(least(40 - v_existing, 15), 0);
+    v_event_type := 'received_vote_' || v_category;
+
+    if v_award > 0 then
+      insert into public.xp_events(user_id, event_type, game_id, points)
+      values (v_user, v_event_type, p_game_id, v_award)
+      on conflict do nothing;
+
+      if found then
+        update public.profiles
+          set xp = coalesce(xp, 0) + v_award
+          where id = v_user;
+      end if;
+    end if;
+  end loop;
+end;
+$$;
+
+
+-- Note: recommended game economy values for this build
+-- host_game = 30 XP
+-- check_in = 20 XP
+-- received_vote = 15 XP each, capped at +40 per session
+-- no-show penalty = -25 XP

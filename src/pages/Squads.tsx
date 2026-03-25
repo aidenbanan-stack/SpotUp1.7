@@ -30,6 +30,8 @@ export default function Squads() {
 
   const [code, setCode] = useState('');
 
+  const squadsUnlocked = (user?.xp ?? 0) >= 300;
+
   async function refresh() {
     if (!user?.id) return;
     setLoading(true);
@@ -122,7 +124,7 @@ export default function Squads() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setJoinOpen(true)}
+              onClick={() => squadsUnlocked && setJoinOpen(true)}
               className="p-2 rounded-xl bg-secondary/60"
               aria-label="Join squad"
               title="Join"
@@ -130,7 +132,7 @@ export default function Squads() {
               <LinkIcon className="w-5 h-5" />
             </button>
             <button
-              onClick={() => setCreateOpen(true)}
+              onClick={() => squadsUnlocked && setCreateOpen(true)}
               className="p-2 rounded-xl bg-secondary/60"
               aria-label="Create squad"
               title="Create"
@@ -142,6 +144,15 @@ export default function Squads() {
       </header>
 
       <main className="px-4 py-5 max-w-2xl mx-auto space-y-4">
+        {!squadsUnlocked ? (
+          <div className="glass-card p-5 text-center">
+            <p className="font-semibold">Squads unlock at 300 XP</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              You currently have {(user?.xp ?? 0).toLocaleString()} XP. Keep playing to unlock full squad features.
+            </p>
+          </div>
+        ) : null}
+
         {/* Tabs (Clash Royale-ish) */}
         <div className="flex gap-2">
           <button
@@ -190,14 +201,14 @@ export default function Squads() {
                 className="bg-secondary/60"
                 autoCapitalize="characters"
               />
-              <Button onClick={onJoin} disabled={!code.trim()} className="h-11">
+              <Button onClick={onJoin} disabled={!code.trim() || !squadsUnlocked} className="h-11">
                 Join
               </Button>
             </div>
 
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">Invite codes are case-insensitive.</p>
-              <Button variant="secondary" onClick={() => setCreateOpen(true)}>
+              <Button variant="secondary" onClick={() => squadsUnlocked && setCreateOpen(true)} disabled={!squadsUnlocked}>
                 Create squad
               </Button>
             </div>
@@ -214,10 +225,10 @@ export default function Squads() {
             </p>
 
             <div className="mt-4 flex gap-2 justify-center">
-              <Button variant="secondary" onClick={() => setJoinOpen(true)}>
+              <Button variant="secondary" onClick={() => squadsUnlocked && setJoinOpen(true)} disabled={!squadsUnlocked}>
                 Join
               </Button>
-              <Button onClick={() => setCreateOpen(true)}>Create</Button>
+              <Button onClick={() => squadsUnlocked && setCreateOpen(true)} disabled={!squadsUnlocked}>Create</Button>
             </div>
           </div>
         ) : (
@@ -310,7 +321,7 @@ export default function Squads() {
               </Select>
             </div>
 
-            <Button className="w-full h-12" onClick={onCreate} disabled={!newName.trim()}>
+            <Button className="w-full h-12" onClick={onCreate} disabled={!newName.trim() || !squadsUnlocked}>
               Create squad
             </Button>
 
@@ -340,7 +351,7 @@ export default function Squads() {
               />
             </div>
 
-            <Button className="w-full h-12" onClick={onJoin} disabled={!code.trim()}>
+            <Button className="w-full h-12" onClick={onJoin} disabled={!code.trim() || !squadsUnlocked}>
               Join
             </Button>
 

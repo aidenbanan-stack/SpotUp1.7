@@ -2,10 +2,7 @@ import { supabase } from '@/lib/supabaseClient';
 
 export type XpEventType =
   | 'host_game'
-  | 'join_game'
   | 'check_in'
-  | 'finish_game'
-  | 'postgame_vote'
   | 'received_vote';
 
 /**
@@ -29,4 +26,21 @@ export async function awardXp(eventType: XpEventType, gameId?: string | null): P
   if (typeof data === 'number') return data;
   if (data && typeof (data as any).xp === 'number') return (data as any).xp;
   return null;
+}
+
+
+export async function awardReceivedVotes(
+  gameId: string,
+  votes: { category: string; votedUserId: string }[]
+): Promise<void> {
+  const { error } = await supabase.rpc('award_received_votes', {
+    p_game_id: gameId,
+    p_votes: votes,
+  });
+
+  if (error) {
+    const msg = (error as any)?.message ?? '';
+    if (msg.toLowerCase().includes('function') && msg.toLowerCase().includes('does not exist')) return;
+    throw error;
+  }
 }

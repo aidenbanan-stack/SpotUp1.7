@@ -7,13 +7,11 @@ import { ArrowLeft, Users, CheckCircle2, Clock, Play, Pause, Flag, AlertTriangle
 import { toast } from 'sonner';
 import { endGame, fetchGameById, setRunsStarted, toggleCheckIn } from '@/lib/gamesApi';
 import { supabase } from '@/lib/supabaseClient';
-import { awardXp } from '@/lib/xpApi';
-import { getOrCreateMyProfile } from '@/lib/profileApi';
 
 export default function LiveGame() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { games, setGames, user, setUser } = useApp();
+  const { games, setGames, user } = useApp();
   const [busy, setBusy] = useState(false);
 
   const game = games.find(g => g.id === id);
@@ -71,16 +69,7 @@ export default function LiveGame() {
       setGames(games.map(g => (g.id === game.id ? { ...g, ...updated } : g)));
       toast.success(!isCheckedIn ? 'Checked in!' : 'Check-in removed.');
 
-      if (!isCheckedIn) {
-        // XP: check-in
-        try {
-          await awardXp('check_in', game.id);
-          const refreshed = await getOrCreateMyProfile();
-          setUser(refreshed);
-        } catch {
-          // Non-blocking
-        }
-      }
+      if (!isCheckedIn) {      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to update check-in.';
       toast.error(msg);
@@ -110,17 +99,7 @@ export default function LiveGame() {
       setBusy(true);
       const updated = await endGame(game.id);
       setGames(games.map(g => (g.id === game.id ? { ...g, ...updated } : g)));
-      toast.success('Game ended. Postgame voting is open.');
-
-      // XP: host finishing a game
-      try {
-        await awardXp('finish_game', game.id);
-        const refreshed = await getOrCreateMyProfile();
-        setUser(refreshed);
-      } catch {
-        // Non-blocking
-      }
-      navigate(`/game/${game.id}/postgame`);
+      toast.success('Game ended. Postgame voting is open.');      navigate(`/game/${game.id}/postgame`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to end game.';
       toast.error(msg);
