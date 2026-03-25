@@ -13,6 +13,7 @@ import { GameCard } from '@/components/GameCard';
 import { XPRoadDialog } from '@/components/XPRoadDialog';
 import { Bell, MapPin, Plus, User, History, MessageCircle, Users2 } from 'lucide-react';
 import { SPORTS, Sport } from '@/types';
+import AnimatedNumber from '@/components/AnimatedNumber';
 import { fetchMyConversations } from '@/lib/messagesApi';
 import { isConversationUnread } from '@/lib/messageReadState';
 
@@ -115,7 +116,7 @@ const filteredGames = selectedSport === 'all'
               aria-label="Open XP Road"
             >
               <span className="text-xs sm:text-sm font-semibold text-foreground">
-                {headerXP.toLocaleString()} XP
+                <AnimatedNumber value={headerXP} /> XP
               </span>
             </button>
 

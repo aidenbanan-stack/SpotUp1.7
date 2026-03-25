@@ -1,5 +1,6 @@
 import { PLAYER_LEVELS, PlayerLevel } from '@/types';
 import { cn } from '@/lib/utils';
+import AnimatedNumber from '@/components/AnimatedNumber';
 
 interface PlayerLevelBadgeProps {
   level: PlayerLevel;
@@ -38,7 +39,7 @@ export function PlayerLevelBadge({
       )}>
         <span>{levelInfo?.icon}</span>
         <span className="font-semibold text-foreground">{levelInfo?.name}</span>
-        <span className="text-muted-foreground">({xp.toLocaleString()} XP)</span>
+        <span className="text-muted-foreground">(<AnimatedNumber value={xp} className="text-muted-foreground" /> XP)</span>
       </div>
       
       {showProgress && nextLevel && (
@@ -50,7 +51,7 @@ export function PlayerLevelBadge({
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            {nextLevel.minXP - xp} XP to {nextLevel.name} {nextLevel.icon}
+            <AnimatedNumber value={Math.max(nextLevel.minXP - xp, 0)} /> XP to {nextLevel.name} {nextLevel.icon}
           </p>
         </div>
       )}

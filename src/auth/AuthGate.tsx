@@ -3,6 +3,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/lib/supabaseClient";
 import { useApp } from "@/context/AppContext";
 import { getOrCreateMyProfile } from "@/lib/profileApi";
+import { showDailyLoginToast } from "@/components/XPGainToast";
 import SignIn from "./SignIn";
 
 /**
@@ -27,7 +28,28 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       try {
         setProfileLoading(true);
         const profile = await getOrCreateMyProfile();
-        if (mounted) setUser(profile);
+        if (!mounted) return;
+        setUser(profile);
+
+        const { error: bonusError } = await supabase.rpc('claim_daily_login_bonus');
+        if (bonusError) {
+          const message = (bonusError as any)?.message ?? '';
+          const missingFn = message.toLowerCase().includes('function') && message.toLowerCase().includes('does not exist');
+          if (!missingFn) {
+            // eslint-disable-next-line no-console
+            console.warn('[Supabase] daily bonus claim failed:', bonusError.message);
+          }
+        } else {
+          const refreshed = await getOrCreateMyProfile();
+          if (!mounted) return;
+          const gained = Math.max(0, (refreshed.xp ?? 0) - (profile.xp ?? 0));
+          if (gained > 0) {
+            setUser(refreshed);
+            showDailyLoginToast(gained, refreshed.xp ?? 0);
+          } else if ((refreshed.xp ?? 0) !== (profile.xp ?? 0)) {
+            setUser(refreshed);
+          }
+        }
       } catch (e) {
         // eslint-disable-next-line no-console
         console.warn("[Supabase] profile load failed:", e);

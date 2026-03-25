@@ -177,3 +177,9 @@
     padding-top: max(env(safe-area-inset-top), 1rem);
   }
 }
+
+
+@keyframes xp-toast-fill {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}

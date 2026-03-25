@@ -7,6 +7,7 @@ import { fetchProfileById } from '@/lib/profileApi';
 import { sendFriendRequest } from '@/lib/socialApi';
 import { toast } from 'sonner';
 import { useApp } from '@/context/AppContext';
+import AnimatedNumber from '@/components/AnimatedNumber';
 
 type Props = {
   open: boolean;
@@ -24,10 +25,13 @@ function initials(name: string) {
 }
 
 function StatPill({ label, value }: { label: string; value: string | number }) {
+  const isNumeric = typeof value === 'number';
   return (
     <div className="glass-card px-3 py-2">
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="text-sm font-semibold text-foreground">{value}</div>
+      <div className="text-sm font-semibold text-foreground">
+        {isNumeric ? <AnimatedNumber value={value as number} /> : value}
+      </div>
     </div>
   );
 }
