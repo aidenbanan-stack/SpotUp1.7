@@ -20,6 +20,7 @@ import { isConversationUnread } from '@/lib/messageReadState';
 
 import { getBrowserLocation, milesBetween, type LatLng } from '@/lib/geo';
 import spotupLogo from '@/assets/SpotUpLogo.jpg';
+import { shouldShowGameOnHome } from '@/lib/gameVisibility';
 
 type SportFilter = Sport | 'all';
 
@@ -74,9 +75,12 @@ export default function Home() {
       mounted = false;
     };
   }, [user?.id]);
-const filteredGames = selectedSport === 'all'
+const nowMs = Date.now();
+
+  const filteredGames = (selectedSport === 'all'
     ? games
-    : games.filter(g => g.sport === selectedSport);
+    : games.filter(g => g.sport === selectedSport))
+    .filter((g) => shouldShowGameOnHome(g, nowMs));
 
   const upcomingGames = filteredGames
     .filter(g => g.status === 'scheduled')

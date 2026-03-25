@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { GameCard } from '@/components/GameCard';
 import { useApp } from '@/context/AppContext';
 import { ArrowLeft } from 'lucide-react';
+import { isAffiliatedWithGame } from '@/lib/gameVisibility';
 
 type Tab = 'scheduled' | 'active' | 'concluded';
 
@@ -16,7 +17,7 @@ export default function GameHistory() {
   const myGames = useMemo(() => {
     if (!user) return [];
     return games
-      .filter(g => g.playerIds.includes(user.id) || g.hostId === user.id)
+      .filter((g) => isAffiliatedWithGame(g, user.id))
       .sort((a, b) => b.dateTime.getTime() - a.dateTime.getTime());
   }, [games, user]);
 
