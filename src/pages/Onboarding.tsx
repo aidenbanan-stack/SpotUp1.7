@@ -4,6 +4,7 @@ import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SportGrid } from '@/components/SportSelector';
 import type { Sport } from '@/types';
 import spotupLogo from '@/assets/SpotUpLogoOld.png';
@@ -11,6 +12,13 @@ import { Camera } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { uploadMyAvatar, updateMyProfile } from '@/lib/profileApi';
+
+const HEIGHT_OPTIONS = [
+  "4'8\"", "4'9\"", "4'10\"", "4'11\"",
+  "5'0\"", "5'1\"", "5'2\"", "5'3\"", "5'4\"", "5'5\"", "5'6\"", "5'7\"", "5'8\"", "5'9\"", "5'10\"", "5'11\"",
+  "6'0\"", "6'1\"", "6'2\"", "6'3\"", "6'4\"", "6'5\"", "6'6\"", "6'7\"", "6'8\"", "6'9\"", "6'10\"", "6'11\"",
+  "7'0\"", "7'1\"", "7'2\""
+];
 
 export default function Onboarding() {
   const navigate = useNavigate();
@@ -119,13 +127,21 @@ export default function Onboarding() {
             </div>
             <div>
               <label className="text-sm text-muted-foreground">Height</label>
-              <Input value={height} onChange={(e) => setHeight(e.target.value)} placeholder={`5'10"`} />
+              <Select value={height} onValueChange={setHeight}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select height" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {HEIGHT_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <label className="text-sm text-muted-foreground">City *</label>
               <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Aliso Viejo, CA" />
             </div>
-          </div>
 
           <div className="mt-3">
             <label className="text-sm text-muted-foreground">Bio</label>

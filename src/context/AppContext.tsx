@@ -3,6 +3,7 @@ import type { User, Sport, Game, Notification } from '@/types';
 import { fetchGames } from '@/lib/gamesApi';
 import { fetchMyNotifications } from '@/lib/notificationsApi';
 import { supabase } from '@/lib/supabaseClient';
+import { getOrCreateMyProfile } from '@/lib/profileApi';
 
 interface AppContextType {
   user: User | null;
@@ -91,6 +92,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
       void supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+
+    const claimDailyLoginBonus = async () => {
+      const { error } = await supabase.rpc('claim_daily_login_bonus');
+      if (error) {
+        const msg = (error as any)?.message ?? '';
+        if (msg.toLowerCase().includes('function') && msg.toLowerCase().includes('does not exist')) return;
+        return;
+      }
+
+      try {
+        const refreshed = await getOrCreateMyProfile();
+        if (!cancelled) setUser(refreshed);
+      } catch {
+        // ignore
+      }
+    };
+
+    void claimDailyLoginBonus();
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   const value: AppContextType = {

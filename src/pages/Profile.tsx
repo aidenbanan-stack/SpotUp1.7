@@ -24,6 +24,55 @@ import { SPORTS, type User as UserType } from '@/types';
 import { supabase } from '@/lib/supabaseClient';
 import { fetchProfileById } from '@/lib/profileApi';
 
+const VOTE_LABELS: Record<string, string> = {
+  most_dominant: '🏆 Most Dominant',
+  best_teammate: '🤝 Best Teammate',
+  most_clutch: '⏱️ Most Clutch',
+  winner: '🛡️ Winner',
+  most_energy: '⚡ Most Energy',
+  bucket_getter: '🏀 Bucket Getter',
+  lockdown_defender: '🔒 Lockdown Defender',
+  floor_general: '🎯 Floor General',
+  board_beast: '🦍 Board Beast',
+  sharpshooter: '🎯 Sharpshooter',
+  finisher: '🥅 Finisher',
+  playmaker: '🪄 Playmaker',
+  wall: '🧱 Wall',
+  ball_winner: '💪 Ball Winner',
+  engine: '🏃 Engine',
+  dink_master: '🏓 Dink Master',
+  net_boss: '🕸️ Net Boss',
+  rally_king: '👑 Rally King',
+  placement_pro: '📍 Placement Pro',
+  unshakeable: '🪨 Unshakeable',
+  qb1: '🏈 QB1',
+  route_runner: '🛣️ Route Runner',
+  hands_team: '🙌 Hands Team',
+  lockdown_db: '🧤 Lockdown DB',
+  big_play_threat: '💥 Big Play Threat',
+  slugger: '💥 Slugger',
+  ace: '🎯 Ace',
+  gold_glove: '🥇 Gold Glove',
+  spark_plug: '⚡ Spark Plug',
+  closer: '🚪 Closer',
+  kill_leader: '🔥 Kill Leader',
+  block_party: '🧱 Block Party',
+  setter_elite: '🎯 Setter Elite',
+  dig_machine: '🛟 Dig Machine',
+  serve_specialist: '🎾 Serve Specialist',
+  handler: '🥏 Handler',
+  deep_threat: '🚀 Deep Threat',
+  shutdown_defender: '🚫 Shutdown Defender',
+  layout_legend: '🤸 Layout Legend',
+  field_general: '🧠 Field General',
+};
+
+function getVoteEntries(votes: Record<string, number> | undefined) {
+  return Object.entries(votes ?? {})
+    .filter(([key, value]) => !['mostDominant', 'bestTeammate'].includes(key) && Number(value) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]));
+}
+
 export default function Profile() {
   const navigate = useNavigate();
   const { user: me, setUser } = useApp();
@@ -97,6 +146,7 @@ export default function Profile() {
   }
 
   const primarySportData = SPORTS.find(s => s.id === user.primarySport);
+  const voteEntries = getVoteEntries(user.votesReceived as Record<string, number> | undefined);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -235,20 +285,18 @@ export default function Profile() {
             <Trophy className="w-4 h-4 text-primary" />
             Post-Game Votes Received
           </h4>
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div>
-              <p className="text-lg font-bold text-foreground">{user.votesReceived.mostDominant}</p>
-              <p className="text-xs text-muted-foreground">🏆 Most Dominant</p>
+          {voteEntries.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-2">No post-game votes yet.</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-center">
+              {voteEntries.map(([key, value]) => (
+                <div key={key}>
+                  <p className="text-lg font-bold text-foreground">{value}</p>
+                  <p className="text-xs text-muted-foreground">{VOTE_LABELS[key] ?? key}</p>
+                </div>
+              ))}
             </div>
-            <div>
-              <p className="text-lg font-bold text-foreground">{user.votesReceived.winner}</p>
-              <p className="text-xs text-muted-foreground">🛡️ Winner</p>
-            </div>
-            <div>
-              <p className="text-lg font-bold text-foreground">{user.votesReceived.bestTeammate}</p>
-              <p className="text-xs text-muted-foreground">🤝 Best Teammate</p>
-            </div>
-          </div>
+          )}
         </section>
 
         {/* Player Info */}

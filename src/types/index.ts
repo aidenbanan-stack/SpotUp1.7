@@ -121,10 +121,10 @@ export interface User {
   badges: Badge[];
   reliabilityStats: ReliabilityStats;
   hostReputation?: HostReputation;
-  votesReceived: {
-    mostDominant: number;
-    winner: number;
-    bestTeammate: number;
+  votesReceived: Partial<Record<PostGameVoteCategory, number>> & {
+    mostDominant?: number;
+    winner?: number;
+    bestTeammate?: number;
   };
   // Court exploration
   uniqueCourtsPlayed?: number;

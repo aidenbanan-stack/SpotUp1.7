@@ -117,6 +117,31 @@ export type IncomingFriendRequest = {
 /**
  * Incoming pending friend requests for the signed-in user.
  */
+
+
+export type OutgoingFriendRequest = {
+  id: string;
+  toUserId: string;
+  createdAt?: string;
+};
+
+export async function fetchMyOutgoingFriendRequests(): Promise<OutgoingFriendRequest[]> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr) throw authErr;
+  const me = auth.user;
+  if (!me) throw new Error('Not signed in.');
+
+  const { data, error } = await supabase
+    .from('friend_requests')
+    .select('id,user_id,friend_id,status,created_at')
+    .eq('status', 'pending')
+    .eq('user_id', me.id)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  const rows = (data ?? []) as FriendRequestRow[];
+  return rows.map((r) => ({ id: r.id, toUserId: r.friend_id, createdAt: r.created_at }));
+}
 export async function fetchMyIncomingFriendRequests(): Promise<IncomingFriendRequest[]> {
   const { data: auth, error: authErr } = await supabase.auth.getUser();
   if (authErr) throw authErr;
