@@ -1,46 +1,20 @@
 import { supabase } from '@/lib/supabaseClient';
 
-export type XpEventType =
-  | 'host_game'
-  | 'check_in'
-  | 'received_vote';
+export type XpEventType = 'host_game' | 'check_in' | 'received_vote';
 
-/**
- * Awards XP for a single, idempotent event.
- * Requires SQL function `award_xp` (see `supabase_sql_updates.sql`).
- * If the function is not installed yet, this becomes a no-op.
- */
-export async function awardXp(eventType: XpEventType, gameId?: string | null): Promise<number | null> {
-  const { data, error } = await supabase
-    .rpc('award_xp', { p_event_type: eventType, p_game_id: gameId ?? null })
-    .maybeSingle();
-
-  if (error) {
-    // If the RPC isn't installed yet, don't break core UX.
-    const msg = (error as any)?.message ?? '';
-    if (msg.toLowerCase().includes('function') && msg.toLowerCase().includes('does not exist')) return null;
-    throw error;
-  }
-
-  // Convention: return payload can be { xp: number } or a raw number.
-  if (typeof data === 'number') return data;
-  if (data && typeof (data as any).xp === 'number') return (data as any).xp;
+export async function awardXp(_eventType: XpEventType, _gameId?: string | null): Promise<number | null> {
   return null;
 }
 
-
 export async function awardReceivedVotes(
-  gameId: string,
-  votes: { category: string; votedUserId: string }[]
+  _gameId: string,
+  _votes: { category: string; votedUserId: string }[]
 ): Promise<void> {
-  const { error } = await supabase.rpc('award_received_votes', {
-    p_game_id: gameId,
-    p_votes: votes,
-  });
+  return;
+}
 
-  if (error) {
-    const msg = (error as any)?.message ?? '';
-    if (msg.toLowerCase().includes('function') && msg.toLowerCase().includes('does not exist')) return;
-    throw error;
-  }
+export async function refreshDailyBonus(): Promise<boolean> {
+  const { data, error } = await supabase.rpc('claim_daily_login_bonus');
+  if (error) throw error;
+  return Boolean(data);
 }

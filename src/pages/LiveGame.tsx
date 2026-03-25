@@ -17,8 +17,6 @@ export default function LiveGame() {
   const game = games.find(g => g.id === id);
 
   const isHost = useMemo(() => !!user && !!game && game.hostId === user.id, [user, game]);
-  const isJoined = useMemo(() => !!user && !!game && game.playerIds.includes(user.id), [user, game]);
-  const isCheckedIn = useMemo(() => !!user && !!game && game.checkedInIds.includes(user.id), [user, game]);
 
   // Realtime: when host ends game, everyone gets the update
   useEffect(() => {
@@ -54,22 +52,23 @@ export default function LiveGame() {
     return u?.username ?? 'Player';
   };
 
-  const handleCheckInToggle = async () => {
+  const handleCheckInToggle = async (targetUserId: string) => {
     if (!user || !game) {
       toast.error('Please sign in first.');
       return;
     }
-    if (!isJoined && !isHost) {
-      toast.error('You need to be signed up to check in.');
+    if (!isHost) {
+      toast.error('Only the host can check players in.');
       return;
     }
+
+    const targetIsCheckedIn = game.checkedInIds.includes(targetUserId);
+
     try {
       setBusy(true);
-      const updated = await toggleCheckIn(game.id, user.id, !isCheckedIn);
+      const updated = await toggleCheckIn(game.id, targetUserId);
       setGames(games.map(g => (g.id === game.id ? { ...g, ...updated } : g)));
-      toast.success(!isCheckedIn ? 'Checked in!' : 'Check-in removed.');
-
-      if (!isCheckedIn) {      }
+      toast.success(targetIsCheckedIn ? 'Check-in removed.' : 'Player checked in.');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to update check-in.';
       toast.error(msg);
@@ -126,7 +125,7 @@ export default function LiveGame() {
     );
   }
 
-  const showPostGameCTA = game.status === 'finished';
+  const showPostGameCTA = game.status === 'finished' || game.status === 'completed';
 
   return (
     <div className="min-h-screen bg-background pb-24 safe-top">
@@ -164,20 +163,17 @@ export default function LiveGame() {
           <div className="flex items-center justify-between">
             <p className="font-semibold text-foreground">Status</p>
             <p className="text-sm text-muted-foreground">
-              {game.status === 'live' ? 'Live' : game.status === 'finished' ? 'Finished' : 'Scheduled'}
+              {game.status === 'live' ? 'Live' : game.status === 'finished' || game.status === 'completed' ? 'Finished' : 'Scheduled'}
             </p>
           </div>
 
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <p className="font-semibold text-foreground">Check-in</p>
-            <Button
-              variant={isCheckedIn ? 'secondary' : 'hero'}
-              onClick={handleCheckInToggle}
-              disabled={busy}
-            >
-              <CheckCircle2 className="w-4 h-4 mr-2" />
-              {isCheckedIn ? 'Checked in' : 'Check in'}
-            </Button>
+            {isHost ? (
+              <span className="text-sm text-muted-foreground">Use the player list below to check players in.</span>
+            ) : (
+              <span className="text-sm text-muted-foreground">The host must check you in when you arrive.</span>
+            )}
           </div>
 
           {isHost && (
@@ -186,7 +182,7 @@ export default function LiveGame() {
                 {game.runsStarted ? <Pause className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
                 {game.runsStarted ? 'Pause runs' : 'Start runs'}
               </Button>
-              <Button variant="destructive" className="flex-1" onClick={handleEndGame} disabled={busy || game.status === 'finished'}>
+              <Button variant="destructive" className="flex-1" onClick={handleEndGame} disabled={busy || game.status === 'finished' || game.status === 'completed'}>
                 <Flag className="w-4 h-4 mr-2" />
                 End game
               </Button>
@@ -204,9 +200,16 @@ export default function LiveGame() {
           ) : (
             <div className="space-y-2">
               {checkedInIds.map(pid => (
-                <div key={pid} className="flex items-center justify-between">
+                <div key={pid} className="flex items-center justify-between gap-3">
                   <p className="text-sm">{resolveName(pid)}</p>
-                  <Clock className="w-4 h-4 text-muted-foreground" />
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-muted-foreground" />
+                    {isHost && (
+                      <Button size="sm" variant="outline" disabled={busy} onClick={() => void handleCheckInToggle(pid)}>
+                        Remove
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

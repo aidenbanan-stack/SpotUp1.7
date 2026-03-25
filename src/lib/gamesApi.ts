@@ -317,9 +317,9 @@ export async function setGameStatus(
   return await hydrateGame(rowToGame(data as GameRow));
 }
 
-export async function toggleCheckIn(gameId: string, _userId: string, checkedIn: boolean): Promise<Game> {
+export async function toggleCheckIn(gameId: string, targetUserId: string): Promise<Game> {
   const { data, error } = await supabase
-    .rpc('toggle_check_in', { p_game_id: gameId, p_checked_in: checkedIn })
+    .rpc('toggle_check_in', { p_game_id: gameId, p_target_user_id: targetUserId })
     .single();
 
   if (error) throw error;
@@ -340,10 +340,7 @@ export async function setRunsStarted(gameId: string, runsStarted: boolean): Prom
 
 export async function endGame(gameId: string): Promise<Game> {
   const { data, error } = await supabase
-    .from('games')
-    .update({ status: 'finished', ended_at: new Date().toISOString(), runs_started: false })
-    .eq('id', gameId)
-    .select('*')
+    .rpc('end_game_session', { p_game_id: gameId })
     .single();
 
   if (error) throw error;
@@ -356,7 +353,7 @@ export async function endGame(gameId: string): Promise<Game> {
  * Requires SQL function `report_no_show` (see `supabase_sql_updates.sql`).
  */
 export async function reportNoShow(gameId: string, reportedUserId: string): Promise<void> {
-  const { error } = await supabase.rpc('report_no_show', { p_game_id: gameId, p_user_id: reportedUserId });
+  const { error } = await supabase.rpc('report_no_show', { p_game_id: gameId, p_reported_user_id: reportedUserId });
   if (error) throw error;
 }
 
@@ -412,64 +409,13 @@ type PostGameVoters = Record<string, Partial<Record<PostGameVoteCategory, string
  */
 export async function submitPostGameVotes(
   gameId: string,
-  voterId: string,
+  _voterId: string,
   votes: { category: PostGameVoteCategory; votedUserId: string }[]
 ): Promise<Game> {
-  const { data: existing, error: fetchError } = await supabase
-    .from('games')
-    .select('post_game_votes, post_game_voters')
-    .eq('id', gameId)
-    .single();
-
-  if (fetchError) throw fetchError;
-
-  const currentVotes: PostGameVotes =
-    (existing?.post_game_votes as PostGameVotes) ?? {};
-
-  const currentVoters: PostGameVoters = (existing?.post_game_voters as PostGameVoters) ?? {};
-
-  const voterRecord = currentVoters[voterId] ?? {};
-  const filtered = votes.filter((v) => !voterRecord[v.category]);
-
-  if (filtered.length === 0) {
-    const { data, error } = await supabase.from('games').select('*').eq('id', gameId).single();
-    if (error) throw error;
-    // rowToGame/hydrateGame are in this file already
-    // @ts-ignore
-    return await hydrateGame(rowToGame(data as GameRow));
-  }
-
-  const nextVotes: PostGameVotes = { ...currentVotes } as any;
-  for (const v of filtered) {
-    const bucket = { ...(nextVotes[v.category] ?? {}) };
-    bucket[v.votedUserId] = (bucket[v.votedUserId] ?? 0) + 1;
-    nextVotes[v.category] = bucket;
-  }
-
-  const nextVoters: PostGameVoters = { ...currentVoters, [voterId]: { ...voterRecord } };
-  for (const v of filtered) {
-    nextVoters[voterId][v.category] = v.votedUserId;
-  }
-
-  // Prefer direct update (works if RLS allows participants). If it fails, fall back to an RPC
-  // (installable via supabase_sql_updates.sql).
   const { data, error } = await supabase
-    .from('games')
-    .update({ post_game_votes: nextVotes, post_game_voters: nextVoters })
-    .eq('id', gameId)
-    .select('*')
+    .rpc('submit_post_game_votes', { p_game_id: gameId, p_votes: votes })
     .single();
 
-  if (!error && data) {
-    // @ts-ignore
-    return await hydrateGame(rowToGame(data as GameRow));
-  }
-
-  const { data: rpcData, error: rpcErr } = await supabase
-    .rpc('submit_post_game_votes', { p_game_id: gameId, p_votes: nextVotes, p_voters: nextVoters })
-    .single();
-
-  if (rpcErr) throw error ?? rpcErr;
-  // @ts-ignore
-  return await hydrateGame(rowToGame(rpcData as GameRow));
+  if (error) throw error;
+  return await hydrateGame(rowToGame(data as GameRow));
 }
