@@ -12,8 +12,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useApp } from '@/context/AppContext';
 import { cn } from '@/lib/utils';
 import { fetchMyFriends } from '@/lib/socialApi';
+import PlayerProfileDialog from '@/components/PlayerProfileDialog';
 import { PLAYER_LEVELS, SPORTS, Sport, User } from '@/types';
-import { ChevronUp, Crown, Gift, Sparkles, Swords, Users } from 'lucide-react';
+import { ChevronUp, Crown, Info, Lock, Sparkles, Swords, Users } from 'lucide-react';
 
 type SportFilter = Sport | 'all';
 
@@ -26,12 +27,24 @@ type RoadTier = {
   drops: number[];
 };
 
-type TierFriendMarker = {
+type RoadMarker = {
   user: User;
   xp: number;
-  progress: number;
-  index: number;
+  y: number;
+  isMe: boolean;
 };
+
+type MarkerCluster = {
+  id: string;
+  y: number;
+  side: 'left' | 'right';
+  users: RoadMarker[];
+};
+
+const ROAD_HEIGHT = 1800;
+const ROAD_TOP_PADDING = 88;
+const ROAD_BOTTOM_PADDING = 64;
+const ROAD_MAX_XP = 11000;
 
 function xpForSport(user: User, sport: SportFilter): number {
   if (sport === 'all') return user.xp;
@@ -58,12 +71,14 @@ function getDropMilestones(levelIndex: number) {
 }
 
 function getInitials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? '')
-    .join('') || 'SU';
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? '')
+      .join('') || 'SU'
+  );
 }
 
 function clamp01(value: number) {
@@ -93,6 +108,61 @@ function buildRoadTiers(): RoadTier[] {
   }));
 }
 
+function xpToY(xp: number) {
+  const normalized = clamp01(xp / ROAD_MAX_XP);
+  return ROAD_TOP_PADDING + (1 - normalized) * ROAD_HEIGHT;
+}
+
+function getTierUnlocks(tier: RoadTier) {
+  switch (tier.id) {
+    case 'rookie':
+      return ['Core profile progression', 'Daily XP drops', 'Join open games'];
+    case 'regular':
+      return ['Squads unlock at 500 XP', 'Create and join squads', 'Start climbing team rankings'];
+    case 'competitor':
+      return ['Higher-tier reputation flex', 'Stronger road presence', 'Competitive identity upgrade'];
+    case 'playmaker':
+      return ['Mid-road prestige tier', 'More visible progression flex', 'Advanced player status'];
+    case 'all_star':
+      return ['Top-end player tier', 'Big milestone flex', 'All-star road status'];
+    case 'elite':
+      return ['Elite progression tier', 'Near-endgame road status', 'High-level player flex'];
+    case 'legend':
+      return ['Final tier on the road', 'Endgame prestige status', 'Top of the XP climb'];
+    default:
+      return ['Tier reward information'];
+  }
+}
+
+function clusterMarkers(markers: RoadMarker[]): MarkerCluster[] {
+  if (!markers.length) return [];
+
+  const sorted = [...markers].sort((a, b) => a.y - b.y);
+  const groups: RoadMarker[][] = [];
+
+  for (const marker of sorted) {
+    const current = groups[groups.length - 1];
+    if (!current) {
+      groups.push([marker]);
+      continue;
+    }
+
+    const avgY = current.reduce((sum, item) => sum + item.y, 0) / current.length;
+    if (Math.abs(marker.y - avgY) <= 34) {
+      current.push(marker);
+    } else {
+      groups.push([marker]);
+    }
+  }
+
+  return groups.map((group, index) => ({
+    id: `cluster-${index}`,
+    y: group.reduce((sum, item) => sum + item.y, 0) / group.length,
+    side: index % 2 === 0 ? 'left' : 'right',
+    users: group.sort((a, b) => Number(b.isMe) - Number(a.isMe) || b.xp - a.xp),
+  }));
+}
+
 export function XPRoadDialog({
   open,
   onOpenChange,
@@ -104,6 +174,10 @@ export function XPRoadDialog({
   const [sportFilter, setSportFilter] = useState<SportFilter>('all');
   const [friends, setFriends] = useState<User[]>([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [selectedCluster, setSelectedCluster] = useState<MarkerCluster | null>(null);
+  const [selectedTier, setSelectedTier] = useState<RoadTier | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -132,17 +206,14 @@ export function XPRoadDialog({
 
   useEffect(() => {
     if (!open) return;
-    const frame = window.requestAnimationFrame(() => {
+    const scrollToBottom = () => {
       const node = scrollRef.current;
       if (!node) return;
       node.scrollTo({ top: node.scrollHeight, behavior: 'auto' });
-    });
+    };
 
-    const timeout = window.setTimeout(() => {
-      const node = scrollRef.current;
-      if (!node) return;
-      node.scrollTo({ top: node.scrollHeight, behavior: 'auto' });
-    }, 120);
+    const frame = window.requestAnimationFrame(scrollToBottom);
+    const timeout = window.setTimeout(scrollToBottom, 140);
 
     return () => {
       window.cancelAnimationFrame(frame);
@@ -162,9 +233,6 @@ export function XPRoadDialog({
   const currentTier = roadTiers[currentTierIndex] ?? roadTiers[0];
   const nextTier = currentTierIndex >= 0 ? roadTiers[currentTierIndex + 1] ?? null : null;
   const progressToNext = useMemo(() => tierProgress(myXP, currentTier), [currentTier, myXP]);
-  const nextDrop = useMemo(() => {
-    return currentTier?.drops.find((milestone) => milestone > myXP) ?? null;
-  }, [currentTier, myXP]);
 
   const friendsRanked = useMemo(() => {
     return [...friends]
@@ -188,301 +256,317 @@ export function XPRoadDialog({
     return SPORTS.find((sport) => sport.id === sportFilter)?.name ?? 'Sport';
   }, [sportFilter]);
 
-  const friendMarkersByTier = useMemo(() => {
-    const markers = new Map<string, TierFriendMarker[]>();
-    for (const tier of roadTiers) markers.set(tier.id, []);
+  const allDropMilestones = useMemo(() => {
+    return roadTiers
+      .flatMap((tier) => tier.drops)
+      .filter((xp, index, arr) => arr.indexOf(xp) === index)
+      .sort((a, b) => a - b);
+  }, [roadTiers]);
 
-    friendsRanked.forEach(({ user: friend, xp }, index) => {
-      const tier = roadTiers.find((entry) => {
-        if (entry.maxXP == null) return xp >= entry.minXP;
-        return xp >= entry.minXP && xp < entry.maxXP;
-      }) ?? roadTiers[0];
+  const markerClusters = useMemo(() => {
+    if (!me) return [];
+    const markers: RoadMarker[] = [
+      { user: me, xp: myXP, y: xpToY(myXP), isMe: true },
+      ...friendsRanked.map(({ user: friend, xp }) => ({
+        user: friend,
+        xp,
+        y: xpToY(xp),
+        isMe: false,
+      })),
+    ];
 
-      const list = markers.get(tier.id) ?? [];
-      list.push({ user: friend, xp, progress: tierProgress(xp, tier), index });
-      markers.set(tier.id, list);
-    });
+    return clusterMarkers(markers);
+  }, [friendsRanked, me, myXP]);
 
-    markers.forEach((list, key) => {
-      markers.set(
-        key,
-        list.sort((a, b) => b.xp - a.xp).slice(0, 5),
-      );
-    });
-
-    return markers;
-  }, [friendsRanked, roadTiers]);
-
-  const displayTiers = useMemo(() => [...roadTiers].reverse(), [roadTiers]);
+  const openProfile = (userId: string) => {
+    setSelectedUserId(userId);
+    setProfileOpen(true);
+  };
 
   if (!me) return null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="left-0 right-0 top-auto bottom-0 translate-x-0 translate-y-0 w-screen max-w-none h-[92dvh] rounded-t-[28px] rounded-b-none border-border/60 bg-background p-0 shadow-2xl sm:left-1/2 sm:right-auto sm:top-[50%] sm:bottom-auto sm:h-[92vh] sm:w-[min(94vw,780px)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[28px]">
-        <DialogHeader className="border-b border-border/50 px-4 pb-3 pt-5 sm:px-6 sticky top-0 bg-background/95 backdrop-blur z-10">
-          <div className="mx-auto mb-2 h-1.5 w-14 rounded-full bg-muted sm:hidden" />
-          <div className="space-y-3 pr-10 text-left">
-            <div>
-              <DialogTitle className="text-2xl">XP Road</DialogTitle>
-              <DialogDescription className="mt-1 text-sm">
-                Starts at your current spot and scrolls upward to higher tiers, just like a vertical trophy road.
-              </DialogDescription>
-            </div>
-            <div className="w-full sm:w-[220px]">
-              <Select value={sportFilter} onValueChange={(value) => setSportFilter(value as SportFilter)}>
-                <SelectTrigger className="rounded-2xl bg-secondary/50">
-                  <SelectValue placeholder="All sports" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All sports</SelectItem>
-                  {SPORTS.map((sport) => (
-                    <SelectItem key={sport.id} value={sport.id}>
-                      {sport.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </DialogHeader>
-
-        <div ref={scrollRef} className="h-[calc(92dvh-112px)] overflow-y-auto overscroll-contain px-4 pb-8 pt-4 sm:h-[calc(92vh-116px)] sm:px-6">
-          <section className="rounded-[28px] border border-border/60 bg-gradient-to-br from-secondary/55 via-background to-secondary/30 p-4 sm:p-5 shadow-sm">
-            <div className="flex items-center gap-3">
-              <Avatar className="h-16 w-16 ring-2 ring-primary/25">
-                <AvatarImage src={me.profilePhotoUrl} alt={me.username} />
-                <AvatarFallback>{getInitials(me.username)}</AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xl font-bold sm:text-2xl">{me.username}</p>
-                <p className="text-sm text-muted-foreground">Rank #{myPlacement} among friends in {sportLabel.toLowerCase()}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">XP</p>
-                <p className="text-2xl font-extrabold">{myXP.toLocaleString()}</p>
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="rounded-2xl bg-secondary/65 p-3">
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Current tier</p>
-                <p className="mt-1 font-semibold">{currentTier.icon} {currentTier.name}</p>
-              </div>
-              <div className="rounded-2xl bg-secondary/65 p-3">
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Next tier</p>
-                <p className="mt-1 font-semibold">{nextTier ? `${nextTier.icon} ${nextTier.name}` : 'Maxed'}</p>
-              </div>
-              <div className="rounded-2xl bg-secondary/65 p-3">
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Next drop</p>
-                <p className="mt-1 font-semibold">{nextDrop ? `${nextDrop.toLocaleString()} XP` : 'Tier cleared'}</p>
-              </div>
-              <div className="rounded-2xl bg-secondary/65 p-3">
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Squads</p>
-                <p className="mt-1 font-semibold">{myXP >= 500 ? 'Unlocked' : `${500 - myXP} XP away`}</p>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl bg-background/70 p-3">
-              <div className="mb-2 flex items-center justify-between text-sm">
-                <span className="font-medium">Progress to {nextTier ? nextTier.name : 'Legend'}</span>
-                <span className="text-muted-foreground">{Math.round(progressToNext * 100)}%</span>
-              </div>
-              <div className="h-3 overflow-hidden rounded-full bg-secondary">
-                <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${progressToNext * 100}%` }} />
-              </div>
-              <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                <span>{currentTier.minXP.toLocaleString()} XP</span>
-                <span>{nextTier ? `${nextTier.minXP.toLocaleString()} XP` : 'Legend cap reached'}</span>
-              </div>
-            </div>
-          </section>
-
-          <section className="mt-4 rounded-[28px] border border-border/60 bg-secondary/20 p-4 sm:p-5">
-            <div className="mb-4 flex items-center justify-between gap-3">
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="inset-0 left-0 right-0 top-0 bottom-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 rounded-none border-0 bg-background p-0 shadow-none sm:inset-0 sm:h-[100dvh] sm:w-screen sm:max-w-none sm:rounded-none">
+          <DialogHeader className="sticky top-0 z-20 border-b border-border/50 bg-background/95 px-4 pb-3 pt-5 backdrop-blur sm:px-6">
+            <div className="mx-auto mb-2 h-1.5 w-14 rounded-full bg-muted sm:hidden" />
+            <div className="space-y-3 pr-10 text-left">
               <div>
-                <h3 className="text-lg font-bold">Vertical XP road</h3>
-                <p className="text-sm text-muted-foreground">Swipe up to climb. Tiers, drops, and friend markers all sit on the center line.</p>
+                <DialogTitle className="text-3xl font-extrabold">XP Road</DialogTitle>
+                <DialogDescription className="mt-1 text-sm">
+                  Starts at 0 XP at the bottom. Swipe up to climb through drops, tiers, and your friends.
+                </DialogDescription>
               </div>
-              <Badge variant="secondary" className="rounded-full px-3 py-1">{friendsLoading ? 'Loading friends…' : `${friends.length} friends`}</Badge>
+              <div className="flex items-center gap-3">
+                <div className="w-full max-w-[220px]">
+                  <Select value={sportFilter} onValueChange={(value) => setSportFilter(value as SportFilter)}>
+                    <SelectTrigger className="rounded-2xl bg-secondary/50">
+                      <SelectValue placeholder="All sports" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All sports</SelectItem>
+                      {SPORTS.map((sport) => (
+                        <SelectItem key={sport.id} value={sport.id}>
+                          {sport.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Badge variant="secondary" className="rounded-full px-3 py-1">
+                  {friendsLoading ? 'Loading…' : `${friends.length + 1} on road`}
+                </Badge>
+              </div>
             </div>
+          </DialogHeader>
 
-            <div className="relative mx-auto max-w-[640px] pb-2">
-              <div className="pointer-events-none absolute bottom-0 left-1/2 top-0 w-[4px] -translate-x-1/2 rounded-full bg-gradient-to-t from-primary via-primary/60 to-primary/20" />
+          <div
+            ref={scrollRef}
+            className="h-[calc(100dvh-118px)] overflow-y-auto overscroll-contain bg-[radial-gradient(circle_at_top,rgba(255,0,0,0.08),transparent_26%),linear-gradient(to_bottom,rgba(9,9,11,0.92),rgba(2,6,23,1))] px-3 pb-10 pt-4 sm:px-6"
+          >
+            <section className="mx-auto max-w-[760px] rounded-[28px] border border-border/60 bg-background/55 p-4 shadow-sm backdrop-blur sm:p-5">
+              <div className="flex items-center gap-3">
+                <Avatar className="h-14 w-14 ring-2 ring-primary">
+                  <AvatarImage src={me.profilePhotoUrl} alt={me.username} />
+                  <AvatarFallback>{getInitials(me.username)}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-lg font-bold sm:text-xl">{me.username}</p>
+                  <p className="text-sm text-muted-foreground">Rank #{myPlacement} among friends in {sportLabel.toLowerCase()}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">XP</p>
+                  <p className="text-2xl font-extrabold">{myXP.toLocaleString()}</p>
+                </div>
+              </div>
 
-              <div className="space-y-6">
-                {displayTiers.map((tier, displayIndex) => {
-                  const originalTierIndex = roadTiers.findIndex((entry) => entry.id === tier.id);
-                  const tierActive = myXP >= tier.minXP && (tier.maxXP == null || myXP < tier.maxXP);
-                  const tierUnlocked = myXP >= tier.minXP;
-                  const markers = friendMarkersByTier.get(tier.id) ?? [];
-                  const leftSide = displayIndex % 2 === 0;
+              <div className="mt-4 grid grid-cols-3 gap-3">
+                <div className="rounded-2xl bg-secondary/65 p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tier</p>
+                  <p className="mt-1 font-semibold">{currentTier.icon} {currentTier.name}</p>
+                </div>
+                <div className="rounded-2xl bg-secondary/65 p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Next tier</p>
+                  <p className="mt-1 font-semibold">{nextTier ? `${nextTier.icon} ${nextTier.name}` : 'Maxed'}</p>
+                </div>
+                <div className="rounded-2xl bg-secondary/65 p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Road</p>
+                  <p className="mt-1 font-semibold">0 to {ROAD_MAX_XP.toLocaleString()} XP</p>
+                </div>
+              </div>
 
-                  return (
-                    <div key={tier.id} className="relative min-h-[240px] sm:min-h-[260px]">
-                      {markers.map((marker, markerIndex) => {
-                        const lane = markerIndex % 2 === 0 ? -1 : 1;
-                        const top = 20 + (1 - marker.progress) * 168;
-                        const horizontalClass = lane < 0 ? 'right-[calc(50%+28px)]' : 'left-[calc(50%+28px)]';
-                        return (
-                          <div
-                            key={marker.user.id}
-                            className={cn(
-                              'absolute z-[2] flex items-center gap-2 rounded-full border border-border/60 bg-background/95 px-2 py-1 shadow-md backdrop-blur',
-                              horizontalClass,
-                            )}
-                            style={{ top: `${top}px` }}
-                          >
-                            <Avatar className="h-7 w-7">
-                              <AvatarImage src={marker.user.profilePhotoUrl} alt={marker.user.username} />
-                              <AvatarFallback>{getInitials(marker.user.username)}</AvatarFallback>
-                            </Avatar>
-                            <div className="max-w-[90px] sm:max-w-[120px]">
-                              <p className="truncate text-xs font-semibold">{marker.user.username}</p>
-                              <p className="text-[10px] text-muted-foreground">{marker.xp.toLocaleString()} XP</p>
-                            </div>
+              <div className="mt-4 rounded-2xl bg-background/70 p-3">
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="font-medium">Progress to {nextTier ? nextTier.name : 'Legend'}</span>
+                  <span className="text-muted-foreground">{Math.round(progressToNext * 100)}%</span>
+                </div>
+                <div className="h-3 overflow-hidden rounded-full bg-secondary">
+                  <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${progressToNext * 100}%` }} />
+                </div>
+                <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{currentTier.minXP.toLocaleString()} XP</span>
+                  <span>{nextTier ? `${nextTier.minXP.toLocaleString()} XP` : 'Legend cap reached'}</span>
+                </div>
+              </div>
+            </section>
+
+            <section className="mx-auto mt-4 max-w-[760px] rounded-[32px] border border-border/60 bg-background/35 p-3 shadow-sm backdrop-blur sm:p-5">
+              <div className="mb-4 flex items-center justify-between gap-3 px-1">
+                <div>
+                  <h3 className="text-lg font-bold">Road</h3>
+                  <p className="text-sm text-muted-foreground">Tier cards stay centered. Profile markers group together when they are close.</p>
+                </div>
+                <Badge variant="secondary" className="rounded-full px-3 py-1">
+                  {sportLabel}
+                </Badge>
+              </div>
+
+              <div className="relative mx-auto w-full max-w-[720px] overflow-hidden rounded-[28px] border border-border/40 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.02),rgba(255,255,255,0.01))] px-2 py-3 sm:px-4">
+                <div
+                  className="relative mx-auto"
+                  style={{ height: ROAD_HEIGHT + ROAD_TOP_PADDING + ROAD_BOTTOM_PADDING }}
+                >
+                  <div className="absolute bottom-0 left-1/2 top-0 w-[6px] -translate-x-1/2 rounded-full bg-gradient-to-t from-primary via-primary/80 to-primary/30 shadow-[0_0_24px_rgba(239,68,68,0.35)]" />
+
+                  {allDropMilestones.map((dropXp, index) => {
+                    const y = xpToY(dropXp);
+                    return (
+                      <div key={`drop-${dropXp}`} className="absolute left-1/2 z-[1]" style={{ top: y, transform: 'translate(-50%, -50%)' }}>
+                        <div className="relative flex items-center justify-center">
+                          <div className="h-[3px] w-8 rounded-full bg-white/85 shadow-sm" />
+                          <div className={cn('absolute text-xs font-semibold text-muted-foreground', index % 2 === 0 ? 'left-5' : 'right-5 text-right')}>
+                            {dropXp.toLocaleString()} XP
                           </div>
-                        );
-                      })}
-
-                      <div className="relative z-[1] mx-auto flex h-14 w-14 items-center justify-center rounded-full border-4 border-background bg-primary text-primary-foreground shadow-lg">
-                        <span className="text-2xl">{tier.icon}</span>
+                        </div>
                       </div>
+                    );
+                  })}
 
-                      <div className={cn('mt-3 flex', leftSide ? 'justify-start pr-[calc(50%+24px)]' : 'justify-end pl-[calc(50%+24px)]')}>
+                  {roadTiers.map((tier) => {
+                    const y = xpToY(tier.minXP);
+                    const tierActive = myXP >= tier.minXP && (tier.maxXP == null || myXP < tier.maxXP);
+                    const tierUnlocked = myXP >= tier.minXP;
+                    return (
+                      <div
+                        key={tier.id}
+                        className="absolute left-1/2 z-[3] w-[min(86vw,320px)]"
+                        style={{ top: y, transform: 'translate(-50%, -50%)' }}
+                      >
                         <div
                           className={cn(
-                            'w-full max-w-[250px] rounded-[24px] border p-4 shadow-sm backdrop-blur',
+                            'rounded-[22px] border px-3 py-2.5 shadow-lg backdrop-blur-md',
                             tierActive
-                              ? 'border-primary/45 bg-primary/10'
+                              ? 'border-primary/60 bg-background/96 shadow-[0_12px_32px_rgba(239,68,68,0.18)]'
                               : tierUnlocked
-                                ? 'border-border/70 bg-background/80'
-                                : 'border-border/50 bg-background/55',
+                                ? 'border-border/70 bg-background/90'
+                                : 'border-border/45 bg-background/75',
                           )}
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-lg font-bold">{tier.name}</p>
-                              <p className="mt-1 text-xs text-muted-foreground">{formatTierRange(tier)}</p>
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-primary/25 bg-primary text-xl text-primary-foreground shadow-sm">
+                              <span>{tier.icon}</span>
                             </div>
-                            {tier.id === 'legend' ? <Crown className="h-5 w-5 text-primary" /> : <Sparkles className="h-5 w-5 text-primary" />}
-                          </div>
-
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {tierActive && <Badge className="rounded-full">Current</Badge>}
-                            {!tierActive && tierUnlocked && <Badge variant="secondary" className="rounded-full">Unlocked</Badge>}
-                            {myXP >= tier.minXP && myXP < (tier.maxXP ?? Number.MAX_SAFE_INTEGER) && nextDrop && (
-                              <Badge variant="secondary" className="rounded-full">Next drop {nextDrop.toLocaleString()}</Badge>
-                            )}
-                          </div>
-
-                          {originalTierIndex === 1 && (
-                            <div className="mt-3 rounded-2xl bg-secondary/60 p-3 text-sm">
-                              <div className="flex items-center gap-2 font-medium">
-                                <Users className="h-4 w-4" />
-                                Squads unlock here
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="truncate text-base font-bold">{tier.name}</p>
+                                {tier.id === 'legend' ? <Crown className="h-4 w-4 text-primary" /> : <Sparkles className="h-4 w-4 text-primary" />}
                               </div>
-                              <p className="mt-1 text-xs text-muted-foreground">Create and join squads once you hit 500 XP.</p>
+                              <p className="text-xs text-muted-foreground">{formatTierRange(tier)}</p>
                             </div>
-                          )}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTier(tier)}
+                              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border/60 bg-secondary/55 transition hover:bg-secondary"
+                              aria-label={`View unlocks for ${tier.name}`}
+                            >
+                              {tierUnlocked ? <Info className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
 
-                          {tier.id === 'legend' && (
-                            <div className="mt-3 rounded-2xl bg-secondary/60 p-3 text-sm">
-                              <div className="flex items-center gap-2 font-medium">
-                                <Crown className="h-4 w-4" />
-                                Final tier
+                  {markerClusters.map((cluster) => {
+                    const isGrouped = cluster.users.length > 1;
+                    const translateX = cluster.side === 'left' ? 'calc(-50% - 34px)' : 'calc(-50% + 34px)';
+                    return (
+                      <button
+                        key={cluster.id}
+                        type="button"
+                        onClick={() => {
+                          if (cluster.users.length === 1) {
+                            openProfile(cluster.users[0].user.id);
+                            return;
+                          }
+                          setSelectedCluster(cluster);
+                        }}
+                        className="absolute left-1/2 z-[4]"
+                        style={{ top: cluster.y, transform: `translate(${translateX}, -50%)` }}
+                        aria-label={isGrouped ? 'Open grouped profiles' : `Open ${cluster.users[0].user.username} profile`}
+                      >
+                        <div className="flex items-center rounded-full border border-border/60 bg-background/96 px-2 py-1.5 shadow-lg backdrop-blur-md">
+                          <div className="flex items-center">
+                            {cluster.users.slice(0, 4).map((marker, index) => (
+                              <div key={marker.user.id} className={cn('relative', index > 0 && '-ml-3')}>
+                                <Avatar className={cn('h-9 w-9 border-2 shadow-sm', marker.isMe ? 'border-red-500 ring-2 ring-red-500/20' : 'border-background')}>
+                                  <AvatarImage src={marker.user.profilePhotoUrl} alt={marker.user.username} />
+                                  <AvatarFallback>{getInitials(marker.user.username)}</AvatarFallback>
+                                </Avatar>
                               </div>
-                              <p className="mt-1 text-xs text-muted-foreground">Top of the road. This is the endgame flex tier for the strongest players.</p>
+                            ))}
+                          </div>
+                          {isGrouped && (
+                            <div className="ml-2 flex h-7 min-w-7 items-center justify-center rounded-full bg-secondary px-2 text-xs font-semibold">
+                              +{cluster.users.length - 1}
                             </div>
                           )}
                         </div>
-                      </div>
+                      </button>
+                    );
+                  })}
 
-                      {tier.drops.length > 0 && (
-                        <div className="mt-4 space-y-3">
-                          {tier.drops
-                            .slice()
-                            .reverse()
-                            .map((dropXp, dropIndex) => {
-                              const dropLeft = (displayIndex + dropIndex + 1) % 2 === 0;
-                              const unlocked = myXP >= dropXp;
-                              return (
-                                <div key={`${tier.id}-${dropXp}`} className="relative flex items-center justify-center">
-                                  <div className="absolute left-1/2 h-9 w-[3px] -translate-x-1/2 rounded-full bg-primary/35" />
-                                  <div className="relative z-[1] flex h-9 w-9 items-center justify-center rounded-full border-2 border-background bg-secondary shadow">
-                                    <Gift className={cn('h-4 w-4', unlocked ? 'text-primary' : 'text-muted-foreground')} />
-                                  </div>
-                                  <div className={cn('w-full pt-1', dropLeft ? 'pr-[calc(50%+24px)]' : 'pl-[calc(50%+24px)]')}>
-                                    <div className={cn('flex', dropLeft ? 'justify-start' : 'justify-end')}>
-                                      <div className={cn('w-full max-w-[220px] rounded-2xl border px-3 py-2 text-sm shadow-sm', unlocked ? 'border-primary/35 bg-background/90' : 'border-border/50 bg-background/65')}>
-                                        <div className="flex items-center justify-between gap-3">
-                                          <span className="font-semibold">Drop</span>
-                                          <span className="text-xs text-muted-foreground">{dropXp.toLocaleString()} XP</span>
-                                        </div>
-                                        <p className="mt-1 text-xs text-muted-foreground">
-                                          {unlocked ? 'Claimed on your road.' : 'Upcoming milestone reward.'}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                  <div
+                    className="absolute left-1/2 z-[2]"
+                    style={{ top: xpToY(0), transform: 'translate(-50%, -50%)' }}
+                  >
+                    <div className="rounded-full border border-border/50 bg-background/95 px-3 py-1 text-sm font-semibold shadow-md">0 XP</div>
+                  </div>
+                </div>
               </div>
+            </section>
+
+            <div className="mx-auto mt-4 flex max-w-[760px] items-center justify-center gap-2 pb-2 text-xs text-muted-foreground">
+              <ChevronUp className="h-4 w-4" />
+              Swipe up to climb the XP road
+              <Swords className="h-4 w-4" />
             </div>
-          </section>
+          </div>
+        </DialogContent>
+      </Dialog>
 
-          <section className="mt-4 rounded-[28px] border border-border/60 bg-background/60 p-4 sm:p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-bold">Friend leaderboard</h3>
-                <p className="text-sm text-muted-foreground">Your closest competition on the road.</p>
-              </div>
-              <Badge variant="secondary" className="rounded-full px-3 py-1">{sportLabel}</Badge>
-            </div>
+      <PlayerProfileDialog open={profileOpen} onOpenChange={setProfileOpen} userId={selectedUserId} />
 
-            {friendsRanked.length === 0 ? (
-              <div className="mt-4 rounded-3xl bg-secondary/40 p-6 text-center">
-                <p className="font-semibold">No friends on the road yet</p>
-                <p className="mt-1 text-sm text-muted-foreground">Once you add friends, their avatars will appear beside the center XP line.</p>
+      <Dialog open={Boolean(selectedCluster)} onOpenChange={(value) => !value && setSelectedCluster(null)}>
+        <DialogContent className="max-w-md rounded-[28px] border-border/60 bg-background/95 p-0 backdrop-blur">
+          <DialogHeader className="border-b border-border/50 px-5 pb-3 pt-5 text-left">
+            <DialogTitle>Profiles on this spot</DialogTitle>
+            <DialogDescription>
+              Players clustered together because their XP is close.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60dvh] space-y-2 overflow-y-auto p-4">
+            {selectedCluster?.users.map((marker) => (
+              <button
+                key={marker.user.id}
+                type="button"
+                onClick={() => {
+                  setSelectedCluster(null);
+                  openProfile(marker.user.id);
+                }}
+                className="flex w-full items-center gap-3 rounded-2xl border border-border/60 bg-secondary/25 p-3 text-left transition hover:bg-secondary/40"
+              >
+                <Avatar className={cn('h-11 w-11 border-2', marker.isMe ? 'border-red-500' : 'border-background')}>
+                  <AvatarImage src={marker.user.profilePhotoUrl} alt={marker.user.username} />
+                  <AvatarFallback>{getInitials(marker.user.username)}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold">{marker.user.username}{marker.isMe ? ' (You)' : ''}</p>
+                  <p className="text-xs text-muted-foreground">{marker.xp.toLocaleString()} XP</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(selectedTier)} onOpenChange={(value) => !value && setSelectedTier(null)}>
+        <DialogContent className="max-w-md rounded-[28px] border-border/60 bg-background/95 p-0 backdrop-blur">
+          <DialogHeader className="border-b border-border/50 px-5 pb-3 pt-5 text-left">
+            <DialogTitle>{selectedTier?.icon} {selectedTier?.name}</DialogTitle>
+            <DialogDescription>
+              {selectedTier ? formatTierRange(selectedTier) : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 p-4">
+            {selectedTier && getTierUnlocks(selectedTier).map((item) => (
+              <div key={item} className="flex items-start gap-3 rounded-2xl border border-border/60 bg-secondary/25 p-3">
+                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                  {selectedTier.minXP <= myXP ? <Info className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+                </div>
+                <p className="text-sm">{item}</p>
               </div>
-            ) : (
-              <div className="mt-4 space-y-2">
-                {friendsRanked.map(({ user: friend, xp }, index) => {
-                  const friendLevel = levelForXP(xp);
-                  return (
-                    <div key={friend.id} className="flex items-center gap-3 rounded-2xl border border-border/60 bg-secondary/25 p-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-background text-sm font-bold text-muted-foreground">
-                        {index + 1}
-                      </div>
-                      <Avatar className="h-10 w-10">
-                        <AvatarImage src={friend.profilePhotoUrl} alt={friend.username} />
-                        <AvatarFallback>{getInitials(friend.username)}</AvatarFallback>
-                      </Avatar>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-semibold">{friend.username}</p>
-                        <p className="truncate text-xs text-muted-foreground">{friendLevel.icon} {friendLevel.name}</p>
-                      </div>
-                      <Badge variant="secondary" className="rounded-full">{xp.toLocaleString()} XP</Badge>
-                    </div>
-                  );
-                })}
+            ))}
+            {selectedTier?.id === 'regular' && (
+              <div className="flex items-start gap-3 rounded-2xl border border-primary/35 bg-primary/10 p-3">
+                <Users className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <p className="text-sm">Squads unlock here and stay unlocked once you pass 500 XP.</p>
               </div>
             )}
-          </section>
-
-          <div className="mt-4 flex items-center justify-center gap-2 pb-2 text-xs text-muted-foreground">
-            <ChevronUp className="h-4 w-4" />
-            Swipe up to keep climbing the XP road
-            <Swords className="h-4 w-4" />
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
