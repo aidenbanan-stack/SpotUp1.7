@@ -434,7 +434,7 @@ export function XPRoadDialog({
               <div className="relative mx-auto w-full max-w-[720px] overflow-hidden rounded-[28px] border border-border/40 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.02),rgba(255,255,255,0.01))] px-2 py-3 sm:px-4">
                 <div
                   className="relative mx-auto"
-                  style={{ height: ROAD_HEIGHT + ROAD_TOP_PADDING + ROAD_BOTTOM_PADDING }}
+                  style={{ height: roadHeight }}
                 >
                   <div className="absolute bottom-[36px] left-1/2 top-[36px] w-[6px] -translate-x-1/2 rounded-full bg-gradient-to-t from-primary via-primary/80 to-primary/30 shadow-[0_0_24px_rgba(239,68,68,0.35)]" />
 
