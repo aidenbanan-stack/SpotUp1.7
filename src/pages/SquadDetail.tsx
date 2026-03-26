@@ -35,9 +35,12 @@ import {
   deleteSquadById,
   fetchMySquads,
   fetchSquadAnnouncements,
+  fetchSquadAuditLogs,
+  fetchSquadBanList,
   fetchSquadEvents,
   fetchSquadFeed,
   fetchSquadInvites,
+  getSquadPermissionBundle,
   joinSquadById,
   fetchSquadJoinRequests,
   fetchSquadMatchHistory,
@@ -55,13 +58,17 @@ import {
   submitSquadJoinRequest,
   updateSquadMemberRole,
   updateSquadProfile,
+  unbanSquadUser,
   upsertSquadSettings,
   type SquadAnnouncement,
+  type SquadAuditRecord,
+  type SquadBanRecord,
   type SquadApplicant,
   type SquadEventCard,
   type SquadFeedItem,
   type SquadInviteCandidate,
   type SquadInviteRecord,
+  type SquadPermissionBundle,
   type SquadMatchHistoryRow,
   type SquadMemberProfile,
   type SquadRivalry,
@@ -117,6 +124,8 @@ export default function SquadDetail() {
   const [announcements, setAnnouncements] = useState<SquadAnnouncement[]>([]);
   const [joinRequests, setJoinRequests] = useState<SquadApplicant[]>([]);
   const [pendingInvites, setPendingInvites] = useState<SquadInviteRecord[]>([]);
+  const [auditLogs, setAuditLogs] = useState<SquadAuditRecord[]>([]);
+  const [banList, setBanList] = useState<SquadBanRecord[]>([]);
   const [inviteSearch, setInviteSearch] = useState('');
   const [inviteCandidates, setInviteCandidates] = useState<SquadInviteCandidate[]>([]);
   const [inviteMessage, setInviteMessage] = useState('');
@@ -168,15 +177,27 @@ export default function SquadDetail() {
   const [channelsDraft, setChannelsDraft] = useState<{ channel_key: string; channel_name: string; is_private: boolean }[]>([]);
 
   const isOwner = user?.id != null && squad?.owner_id === user.id;
-  const canManage = isOwner || ['captain', 'officer'].includes((currentUserRole ?? '').toLowerCase());
-  const canInvite = canManage || settingsForm.allow_member_invites;
-  const canPostAnnouncements = isOwner || ['captain'].includes((currentUserRole ?? '').toLowerCase()) || (settingsForm.allow_officer_announcements && ['officer'].includes((currentUserRole ?? '').toLowerCase()));
+  const permissions: SquadPermissionBundle = useMemo(() => getSquadPermissionBundle({ role: currentUserRole, isOwner, settings: settingsForm }), [currentUserRole, isOwner, settingsForm]);
+  const canManage = permissions.canReviewApplications || permissions.canViewAuditLogs || permissions.canViewBanList || permissions.canEditSquadSettings;
+  const canInvite = permissions.canInvitePlayers;
+  const canPostAnnouncements = permissions.canPostAnnouncements;
+
+  function canManageMember(target: SquadMemberProfile) {
+    if (!user?.id) return false;
+    if (target.user_id === user.id) return false;
+    const actorRole = (currentUserRole ?? 'member').toLowerCase();
+    const targetRole = (target.role ?? 'member').toLowerCase();
+    const rank = (role: string) => role === 'captain' ? 3 : role === 'officer' ? 2 : 1;
+    if (isOwner) return true;
+    if (!permissions.canManageMembers) return false;
+    return rank(actorRole) > rank(targetRole);
+  }
 
   async function loadAll() {
     if (!id || !user?.id) return;
     setLoading(true);
     try {
-      const [memberRows, mine, matchRows, upcoming, step1, announcementRows, requestRows, inviteRows] = await Promise.all([
+      const [memberRows, mine, matchRows, upcoming, step1, announcementRows, requestRows, inviteRows, auditRows, banRows] = await Promise.all([
         fetchSquadMembers(id),
         fetchMySquads(user.id),
         fetchSquadMatchHistory(id),
@@ -185,6 +206,8 @@ export default function SquadDetail() {
         fetchSquadAnnouncements(id).catch(() => []),
         fetchSquadJoinRequests(id).catch(() => []),
         fetchSquadInvites(id).catch(() => []),
+        fetchSquadAuditLogs(id).catch(() => []),
+        fetchSquadBanList(id).catch(() => []),
       ]);
       const rivalryRows = await fetchSquadRivalries(id);
       const feedRows = await fetchSquadFeed({ squad: step1.squad, members: memberRows, matches: matchRows });
@@ -199,6 +222,8 @@ export default function SquadDetail() {
       setAnnouncements(announcementRows);
       setJoinRequests(requestRows);
       setPendingInvites(inviteRows);
+      setAuditLogs(auditRows);
+      setBanList(banRows);
       const myMembership = memberRows.find((row) => row.user_id === user.id) ?? null;
       setCurrentUserRole(myMembership?.role ?? null);
       setIsMember(Boolean(mine.some((row) => row.id === id) || myMembership));
@@ -296,7 +321,7 @@ export default function SquadDetail() {
       setSquad(updatedSquad);
       setSettingsForm(updatedSettings);
       await reloadStep1();
-      toast({ title: 'Step 2 settings saved', description: 'Squad profile and application settings updated.' });
+      toast({ title: 'Step 3 settings saved', description: 'Squad profile and permissions settings updated.' });
     } catch (e: any) {
       console.error(e);
       toast({ title: 'Could not save squad settings', description: e?.message ?? 'Please try again.', variant: 'destructive' });
@@ -363,7 +388,7 @@ export default function SquadDetail() {
     if (!id) return;
     setRevokingInviteId(inviteId);
     try {
-      await revokeSquadInvite({ squadId: id, inviteId });
+      await revokeSquadInvite({ squadId: id, inviteId, actorUserId: user?.id ?? '' });
       await loadAll();
       toast({ title: 'Invite revoked' });
     } catch (e: any) {
@@ -378,7 +403,7 @@ export default function SquadDetail() {
     if (!id) return;
     setMemberActionUserId(memberUserId);
     try {
-      await updateSquadMemberRole({ squadId: id, memberUserId, nextRole });
+      await updateSquadMemberRole({ squadId: id, memberUserId, nextRole: nextRole as 'member' | 'officer' | 'captain', actorUserId: user?.id ?? '' });
       await loadAll();
       toast({ title: 'Role updated' });
     } catch (e: any) {
@@ -393,7 +418,7 @@ export default function SquadDetail() {
     if (!id) return;
     setMemberActionUserId(memberUserId);
     try {
-      await removeSquadMember({ squadId: id, memberUserId });
+      await removeSquadMember({ squadId: id, memberUserId, actorUserId: user?.id ?? '' });
       await loadAll();
       toast({ title: 'Member removed' });
     } catch (e: any) {
@@ -435,6 +460,21 @@ export default function SquadDetail() {
       toast({ title: 'Could not post announcement', description: e?.message ?? 'Please try again.', variant: 'destructive' });
     } finally {
       setPostingAnnouncement(false);
+    }
+  }
+
+  async function onUnban(memberUserId: string) {
+    if (!id || !user?.id) return;
+    setMemberActionUserId(memberUserId);
+    try {
+      await unbanSquadUser({ squadId: id, userId: memberUserId, actorUserId: user.id });
+      await loadAll();
+      toast({ title: 'Player unbanned' });
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Could not unban player', description: e?.message ?? 'Please try again.', variant: 'destructive' });
+    } finally {
+      setMemberActionUserId(null);
     }
   }
 
@@ -721,6 +761,17 @@ export default function SquadDetail() {
           {canManage ? (
             <>
               <Card>
+                <CardHeader><CardTitle>Leadership permissions</CardTitle></CardHeader>
+                <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="rounded-xl border p-3"><div className="font-medium">Your role</div><div className="text-sm text-muted-foreground capitalize">{isOwner ? 'owner' : (currentUserRole ?? 'member')}</div></div>
+                  <div className="rounded-xl border p-3"><div className="font-medium">Application review</div><div className="text-sm text-muted-foreground">{permissions.canReviewApplications ? 'Enabled' : 'Not allowed'}</div></div>
+                  <div className="rounded-xl border p-3"><div className="font-medium">Invite players</div><div className="text-sm text-muted-foreground">{permissions.canInvitePlayers ? 'Enabled' : 'Not allowed'}</div></div>
+                  <div className="rounded-xl border p-3"><div className="font-medium">Announcements</div><div className="text-sm text-muted-foreground">{permissions.canPostAnnouncements ? 'Enabled' : 'Not allowed'}</div></div>
+                  <div className="rounded-xl border p-3"><div className="font-medium">Member moderation</div><div className="text-sm text-muted-foreground">{permissions.canManageMembers ? 'Enabled' : 'Not allowed'}</div></div>
+                  <div className="rounded-xl border p-3"><div className="font-medium">Settings edits</div><div className="text-sm text-muted-foreground">{permissions.canEditSquadSettings ? 'Owner only' : 'Read only'}</div></div>
+                </CardContent>
+              </Card>
+              <Card>
                 <CardHeader><CardTitle>Applications</CardTitle></CardHeader>
                 <CardContent className="space-y-3">
                   {joinRequests.length === 0 ? <div className="text-sm text-muted-foreground">No pending applications right now.</div> : joinRequests.map((request) => (
@@ -825,7 +876,7 @@ export default function SquadDetail() {
             </>
           ) : null}
 
-          {isOwner ? (
+          {permissions.canEditSquadSettings ? (
             <>
               <Card>
                 <CardHeader><CardTitle>Squad profile</CardTitle></CardHeader>
@@ -895,7 +946,38 @@ export default function SquadDetail() {
                 </CardContent>
               </Card>
 
-              <Button onClick={onSaveStep1} disabled={savingStep1}>{savingStep1 ? 'Saving...' : 'Save squad settings'}</Button>
+              <Card>
+                <CardHeader><CardTitle>Ban list</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  {banList.length === 0 ? <div className="text-sm text-muted-foreground">No banned players.</div> : banList.map((ban) => (
+                    <div key={ban.user_id} className="rounded-xl border p-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <div className="font-medium">{ban.username ?? 'Unknown player'}</div>
+                        <div className="text-xs text-muted-foreground">Banned by {ban.banned_by_username ?? 'leadership'} on {formatDate(ban.created_at)}</div>
+                        {ban.reason ? <div className="text-sm text-muted-foreground mt-1">{ban.reason}</div> : null}
+                      </div>
+                      {permissions.canBanMembers ? <Button variant="secondary" disabled={memberActionUserId === ban.user_id} onClick={() => onUnban(ban.user_id)}>Unban</Button> : null}
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader><CardTitle>Audit log</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  {auditLogs.length === 0 ? <div className="text-sm text-muted-foreground">No leadership actions logged yet.</div> : auditLogs.map((log) => (
+                    <div key={log.id} className="rounded-xl border p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="capitalize">{log.action.replace(/_/g, ' ')}</Badge>
+                        <span className="text-xs text-muted-foreground">{formatDate(log.created_at)}</span>
+                      </div>
+                      <div className="text-sm mt-2">{log.actor_username ?? 'System'} {log.target_username ? <>to {log.target_username}</> : null}</div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
+              {permissions.canEditSquadSettings ? <Button onClick={onSaveStep1} disabled={savingStep1}>{savingStep1 ? 'Saving...' : 'Save squad settings'}</Button> : null}
             </>
           ) : null}
         </TabsContent>

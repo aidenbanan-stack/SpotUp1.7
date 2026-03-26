@@ -45,15 +45,51 @@ export type SquadDiscoverRow = SquadRow & {
   is_nearby: boolean;
 };
 
+export type SquadRole = 'member' | 'officer' | 'captain';
+
 export type SquadMemberProfile = {
   squad_id: string;
   user_id: string;
-  role: string;
+  role: SquadRole | string;
   username: string | null;
   city?: string | null;
   reliability_score?: number;
   xp: number;
   level: number;
+};
+
+export type SquadPermissionBundle = {
+  canReviewApplications: boolean;
+  canInvitePlayers: boolean;
+  canPostAnnouncements: boolean;
+  canManageMembers: boolean;
+  canBanMembers: boolean;
+  canEditSquadSettings: boolean;
+  canViewAuditLogs: boolean;
+  canViewBanList: boolean;
+  canManageChannels: boolean;
+};
+
+export type SquadAuditRecord = {
+  id: string;
+  squad_id: string;
+  actor_user_id: string | null;
+  actor_username: string | null;
+  action: string;
+  target_user_id: string | null;
+  target_username: string | null;
+  metadata: Record<string, any>;
+  created_at: string;
+};
+
+export type SquadBanRecord = {
+  squad_id: string;
+  user_id: string;
+  username: string | null;
+  banned_by: string;
+  banned_by_username: string | null;
+  reason: string | null;
+  created_at: string;
 };
 
 export type SquadApplicant = {
@@ -230,6 +266,97 @@ function normalizeSettings(row: any, squad: SquadRow): SquadSettings {
 
 function sortByOrder<T extends { sort_order: number }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => a.sort_order - b.sort_order);
+}
+
+function normalizeRole(role?: string | null): SquadRole {
+  const value = (role ?? 'member').toLowerCase();
+  if (value === 'captain') return 'captain';
+  if (value === 'officer') return 'officer';
+  return 'member';
+}
+
+function roleRank(role?: string | null): number {
+  const normalized = normalizeRole(role);
+  return normalized === 'captain' ? 3 : normalized === 'officer' ? 2 : 1;
+}
+
+export function getSquadPermissionBundle(args: {
+  role?: string | null;
+  isOwner?: boolean;
+  settings?: Partial<SquadSettings> | null;
+}): SquadPermissionBundle {
+  const role = normalizeRole(args.role);
+  const isOwner = Boolean(args.isOwner);
+  const memberInvites = Boolean(args.settings?.allow_member_invites);
+  const officerAnnouncements = args.settings?.allow_officer_announcements !== false;
+  return {
+    canReviewApplications: isOwner || role === 'captain' || role === 'officer',
+    canInvitePlayers: isOwner || role === 'captain' || role === 'officer' || memberInvites,
+    canPostAnnouncements: isOwner || role === 'captain' || (role === 'officer' && officerAnnouncements),
+    canManageMembers: isOwner || role === 'captain',
+    canBanMembers: isOwner || role === 'captain',
+    canEditSquadSettings: isOwner,
+    canViewAuditLogs: isOwner || role === 'captain' || role === 'officer',
+    canViewBanList: isOwner || role === 'captain' || role === 'officer',
+    canManageChannels: isOwner,
+  };
+}
+
+async function fetchActorContext(squadId: string, userId: string) {
+  const [squad, membershipRes, settingsRes] = await Promise.all([
+    fetchSquadById(squadId),
+    supabase.from('squad_members').select('role').eq('squad_id', squadId).eq('user_id', userId).maybeSingle(),
+    supabase.from('squad_settings').select('*').eq('squad_id', squadId).maybeSingle(),
+  ]);
+  const role = normalizeRole((membershipRes.data as any)?.role ?? null);
+  const isOwner = squad.owner_id === userId;
+  const settings = normalizeSettings(settingsRes.data, squad);
+  const permissions = getSquadPermissionBundle({ role, isOwner, settings });
+  return { squad, role, isOwner, settings, permissions };
+}
+
+function canManageTarget(args: {
+  actorRole?: string | null;
+  actorIsOwner?: boolean;
+  actorUserId: string;
+  targetUserId: string;
+  targetRole?: string | null;
+}): boolean {
+  const permissions = getSquadPermissionBundle({ role: args.actorRole, isOwner: args.actorIsOwner });
+  if (!permissions.canManageMembers) return false;
+  if (args.actorUserId === args.targetUserId) return false;
+  if (args.actorIsOwner) return true;
+  return roleRank(args.actorRole) > roleRank(args.targetRole);
+}
+
+async function ensureCanInvitePlayers(squadId: string, userId: string) {
+  const context = await fetchActorContext(squadId, userId);
+  if (!context.permissions.canInvitePlayers) throw new Error('You do not have permission to invite players.');
+  return context;
+}
+
+async function ensureCanReviewApplications(squadId: string, userId: string) {
+  const context = await fetchActorContext(squadId, userId);
+  if (!context.permissions.canReviewApplications) throw new Error('You do not have permission to review applications.');
+  return context;
+}
+
+async function ensureCanPostAnnouncements(squadId: string, userId: string) {
+  const context = await fetchActorContext(squadId, userId);
+  if (!context.permissions.canPostAnnouncements) throw new Error('You do not have permission to post announcements.');
+  return context;
+}
+
+async function ensureCanManageSpecificTarget(args: { squadId: string; actorUserId: string; targetUserId: string }) {
+  const [context, targetMembership] = await Promise.all([
+    fetchActorContext(args.squadId, args.actorUserId),
+    supabase.from('squad_members').select('role').eq('squad_id', args.squadId).eq('user_id', args.targetUserId).maybeSingle(),
+  ]);
+  const targetRole = normalizeRole((targetMembership.data as any)?.role ?? null);
+  if (!canManageTarget({ actorRole: context.role, actorIsOwner: context.isOwner, actorUserId: args.actorUserId, targetUserId: args.targetUserId, targetRole })) {
+    throw new Error('You do not have permission to manage that member.');
+  }
+  return { ...context, targetRole };
 }
 
 export async function fetchMySquads(userId: string): Promise<SquadWithMeta[]> {
@@ -827,6 +954,11 @@ export async function submitSquadJoinRequest(args: {
   message?: string;
 }): Promise<void> {
   const cleanMessage = args.message?.trim() || '';
+  const squad = await fetchSquadById(args.squadId);
+  const { data: banned } = await supabase.from('squad_bans').select('user_id').eq('squad_id', args.squadId).eq('user_id', args.userId).maybeSingle();
+  if (banned) throw new Error('You are banned from this squad.');
+  const { count: memberCount } = await supabase.from('squad_members').select('user_id', { count: 'exact', head: true }).eq('squad_id', args.squadId);
+  if ((memberCount ?? 0) >= Number(squad.member_limit ?? 10)) throw new Error('This squad is already full.');
   const { data: existing, error: existingError } = await supabase
     .from('squad_join_requests')
     .select('id, status')
@@ -853,6 +985,7 @@ export async function reviewSquadJoinRequest(args: {
   reviewByUserId: string;
   approve: boolean;
 }): Promise<void> {
+  await ensureCanReviewApplications(args.squadId, args.reviewByUserId);
   const { data: req, error: reqError } = await supabase
     .from('squad_join_requests')
     .select('id, squad_id, user_id, status')
@@ -954,6 +1087,11 @@ export async function createSquadInvite(args: {
   invitedByUserId: string;
   message?: string;
 }): Promise<void> {
+  const context = await ensureCanInvitePlayers(args.squadId, args.invitedByUserId);
+  const { data: banned } = await supabase.from('squad_bans').select('user_id').eq('squad_id', args.squadId).eq('user_id', args.invitedUserId).maybeSingle();
+  if (banned) throw new Error('That player is banned from this squad.');
+  const { count: memberCount } = await supabase.from('squad_members').select('user_id', { count: 'exact', head: true }).eq('squad_id', args.squadId);
+  if ((memberCount ?? 0) >= Number(context.squad.member_limit ?? 10)) throw new Error('This squad is already full.');
   const { data: existingMembership } = await supabase
     .from('squad_members')
     .select('user_id')
@@ -1001,6 +1139,13 @@ export async function respondSquadInvite(args: {
     .single();
   if (inviteError) throw inviteError;
   if (invite.invited_user_id !== args.userId) throw new Error('You cannot respond to this invite.');
+  if (args.accept) {
+    const squad = await fetchSquadById(invite.squad_id);
+    const { data: banned } = await supabase.from('squad_bans').select('user_id').eq('squad_id', invite.squad_id).eq('user_id', args.userId).maybeSingle();
+    if (banned) throw new Error('You are banned from this squad.');
+    const { count: memberCount } = await supabase.from('squad_members').select('user_id', { count: 'exact', head: true }).eq('squad_id', invite.squad_id);
+    if ((memberCount ?? 0) >= Number(squad.member_limit ?? 10)) throw new Error('This squad is already full.');
+  }
 
   const status = args.accept ? 'accepted' : 'declined';
   const { error } = await supabase.from('squad_invites').update({ status }).eq('id', args.inviteId);
@@ -1030,7 +1175,8 @@ export async function respondSquadInvite(args: {
   return invite.squad_id;
 }
 
-export async function revokeSquadInvite(args: { squadId: string; inviteId: string }): Promise<void> {
+export async function revokeSquadInvite(args: { squadId: string; inviteId: string; actorUserId: string }): Promise<void> {
+  await ensureCanInvitePlayers(args.squadId, args.actorUserId);
   const { error } = await supabase.from('squad_invites').update({ status: 'revoked' }).eq('id', args.inviteId).eq('squad_id', args.squadId);
   if (error) throw error;
   await logSquadAudit({ squadId: args.squadId, action: 'squad_invite_revoked', metadata: { invite_id: args.inviteId } });
@@ -1065,28 +1211,35 @@ export async function searchProfilesForSquadInvites(args: {
 export async function updateSquadMemberRole(args: {
   squadId: string;
   memberUserId: string;
-  nextRole: string;
+  nextRole: SquadRole;
+  actorUserId: string;
 }): Promise<void> {
+  const context = await ensureCanManageSpecificTarget({ squadId: args.squadId, actorUserId: args.actorUserId, targetUserId: args.memberUserId });
+  const nextRole = normalizeRole(args.nextRole);
+  if (!context.isOwner && roleRank(nextRole) >= roleRank(context.role)) throw new Error('You can only assign roles below your own level.');
+  if (context.isOwner && nextRole === 'captain' && args.memberUserId !== context.squad.owner_id) throw new Error('Use owner transfer for a captain handoff.');
   const { error } = await supabase
     .from('squad_members')
-    .update({ role: args.nextRole })
+    .update({ role: nextRole })
     .eq('squad_id', args.squadId)
     .eq('user_id', args.memberUserId);
   if (error) throw error;
-  await logSquadAudit({ squadId: args.squadId, action: 'member_role_updated', metadata: { target_user_id: args.memberUserId, role: args.nextRole } });
+  await logSquadAudit({ squadId: args.squadId, action: 'member_role_updated', metadata: { actor_user_id: args.actorUserId, target_user_id: args.memberUserId, role: nextRole } });
 }
 
 export async function removeSquadMember(args: {
   squadId: string;
   memberUserId: string;
+  actorUserId: string;
 }): Promise<void> {
+  await ensureCanManageSpecificTarget({ squadId: args.squadId, actorUserId: args.actorUserId, targetUserId: args.memberUserId });
   const { error } = await supabase
     .from('squad_members')
     .delete()
     .eq('squad_id', args.squadId)
     .eq('user_id', args.memberUserId);
   if (error) throw error;
-  await logSquadAudit({ squadId: args.squadId, action: 'member_removed', metadata: { target_user_id: args.memberUserId } });
+  await logSquadAudit({ squadId: args.squadId, action: 'member_removed', metadata: { actor_user_id: args.actorUserId, target_user_id: args.memberUserId } });
 }
 
 export async function banSquadUser(args: {
@@ -1095,7 +1248,8 @@ export async function banSquadUser(args: {
   bannedByUserId: string;
   reason?: string;
 }): Promise<void> {
-  await removeSquadMember({ squadId: args.squadId, memberUserId: args.memberUserId });
+  await ensureCanManageSpecificTarget({ squadId: args.squadId, actorUserId: args.bannedByUserId, targetUserId: args.memberUserId });
+  await removeSquadMember({ squadId: args.squadId, memberUserId: args.memberUserId, actorUserId: args.bannedByUserId });
   const { error } = await supabase.from('squad_bans').upsert({
     squad_id: args.squadId,
     user_id: args.memberUserId,
@@ -1134,6 +1288,7 @@ export async function createSquadAnnouncement(args: {
   body: string;
   isPinned?: boolean;
 }): Promise<void> {
+  await ensureCanPostAnnouncements(args.squadId, args.authorId);
   const { error } = await supabase.from('squad_announcements').insert({
     squad_id: args.squadId,
     author_id: args.authorId,
@@ -1150,4 +1305,37 @@ export async function createSquadAnnouncement(args: {
     actor_user_id: args.authorId,
   });
   await logSquadAudit({ squadId: args.squadId, action: 'announcement_created', metadata: { title: args.title.trim() } });
+}
+
+export async function fetchSquadAuditLogs(squadId: string): Promise<SquadAuditRecord[]> {
+  const { data, error } = await supabase
+    .from('squad_audit_logs')
+    .select('id, squad_id, actor_user_id, action, target_user_id, metadata, created_at, actor:profiles!squad_audit_logs_actor_user_id_fkey(username), target:profiles!squad_audit_logs_target_user_id_fkey(username)')
+    .eq('squad_id', squadId)
+    .order('created_at', { ascending: false })
+    .limit(30);
+  if (error) throw error;
+  return (data ?? []).map((row: any) => ({
+    id: row.id, squad_id: row.squad_id, actor_user_id: row.actor_user_id ?? null, actor_username: row.actor?.username ?? null, action: row.action, target_user_id: row.target_user_id ?? null, target_username: row.target?.username ?? null, metadata: row.metadata ?? {}, created_at: row.created_at,
+  }));
+}
+
+export async function fetchSquadBanList(squadId: string): Promise<SquadBanRecord[]> {
+  const { data, error } = await supabase
+    .from('squad_bans')
+    .select('squad_id, user_id, banned_by, reason, created_at, user:profiles!squad_bans_user_id_fkey(username), banner:profiles!squad_bans_banned_by_fkey(username)')
+    .eq('squad_id', squadId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((row: any) => ({
+    squad_id: row.squad_id, user_id: row.user_id, username: row.user?.username ?? null, banned_by: row.banned_by, banned_by_username: row.banner?.username ?? null, reason: row.reason ?? null, created_at: row.created_at,
+  }));
+}
+
+export async function unbanSquadUser(args: { squadId: string; userId: string; actorUserId: string }): Promise<void> {
+  const context = await fetchActorContext(args.squadId, args.actorUserId);
+  if (!context.permissions.canBanMembers) throw new Error('You do not have permission to manage bans.');
+  const { error } = await supabase.from('squad_bans').delete().eq('squad_id', args.squadId).eq('user_id', args.userId);
+  if (error) throw error;
+  await logSquadAudit({ squadId: args.squadId, action: 'member_unbanned', metadata: { actor_user_id: args.actorUserId, target_user_id: args.userId } });
 }
