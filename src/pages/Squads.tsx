@@ -36,7 +36,7 @@ export default function Squads() {
   const [busyJoinId, setBusyJoinId] = useState<string | null>(null);
 
   const joinUnlocked = (user?.xp ?? 0) >= 500;
-  const createUnlocked = (user?.xp ?? 0) >= 1000;
+  const createUnlocked = (user?.xp ?? 0) >= 500;
   const cityLabel = user?.city?.trim() || 'your area';
 
   const sportIcon = (sport: Sport | null) => {
@@ -207,7 +207,13 @@ export default function Squads() {
           </button>
           <h1 className="text-xl font-bold">Squads</h1>
           <button
-            onClick={() => createUnlocked && setCreateOpen(true)}
+            onClick={() => {
+              if (!createUnlocked) {
+                alert('You need 500 XP to create a squad.');
+                return;
+              }
+              setCreateOpen(true);
+            }}
             className="p-2 rounded-xl bg-secondary/60"
             aria-label="Create squad"
             title="Create"
@@ -221,7 +227,7 @@ export default function Squads() {
         <div className="glass-card p-5 text-center">
           <p className="font-semibold">Squad requirements</p>
           <p className="text-sm text-muted-foreground mt-1">
-            Join at 500 XP. Create at 1000 XP. Squads cap at 10 members. Competitive rankings favor points and record, with XP as a secondary signal.
+            Join at 500 XP. Create at 500 XP. Squads cap at 10 members. Competitive rankings favor points and record, with XP as a secondary signal.
           </p>
           <p className="text-xs text-muted-foreground mt-2">
             You currently have {(user?.xp ?? 0).toLocaleString()} XP{user?.city ? ` • Area: ${user.city}` : ''}.
@@ -252,7 +258,7 @@ export default function Squads() {
               <p className="text-sm text-muted-foreground mt-1">Create one or discover squads in your area.</p>
               <div className="mt-4 flex justify-center gap-2">
                 <Button variant="secondary" onClick={() => setTab('discover')}>Discover</Button>
-                <Button onClick={() => createUnlocked && setCreateOpen(true)} disabled={!createUnlocked}>Create</Button>
+                <Button onClick={() => setCreateOpen(true)} disabled={!createUnlocked}>Create</Button>
               </div>
             </div>
           ) : (
@@ -341,7 +347,7 @@ export default function Squads() {
               Create squad
             </Button>
             {!createUnlocked ? (
-              <p className="text-xs text-center text-muted-foreground">You need 1000 XP to create a squad.</p>
+              <p className="text-xs text-center text-muted-foreground">You need 500 XP to create a squad.</p>
             ) : null}
           </div>
         </DialogContent>

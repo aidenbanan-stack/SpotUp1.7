@@ -8,8 +8,15 @@ create table if not exists public.user_entitlements (
   granted_at timestamptz not null default now(),
   expires_at timestamptz,
   notes text,
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  entitlement text not null default 'pro',
+  is_active boolean not null default true,
+  metadata jsonb not null default '{}'::jsonb
 );
+
+alter table public.user_entitlements add column if not exists entitlement text not null default 'pro';
+alter table public.user_entitlements add column if not exists is_active boolean not null default true;
+alter table public.user_entitlements add column if not exists metadata jsonb not null default '{}'::jsonb;
 
 alter table public.squads add column if not exists min_xp_required integer not null default 0;
 alter table public.squads add column if not exists member_limit integer not null default 10;
@@ -39,6 +46,7 @@ as $$
         from public.user_entitlements ue
         where ue.user_id = p_user_id
           and ue.is_pro = true
+          and coalesce(ue.is_active, true) = true
           and (ue.expires_at is null or ue.expires_at > now())
       );
 $$;
@@ -66,14 +74,18 @@ begin
     raise exception 'Admin only';
   end if;
 
-  insert into public.user_entitlements (user_id, is_pro, granted_by, granted_at, notes, updated_at)
-  values (p_user_id, true, auth.uid(), now(), p_notes, now())
+  insert into public.user_entitlements (
+    user_id, is_pro, granted_by, granted_at, notes, updated_at, entitlement, is_active, metadata
+  )
+  values (p_user_id, true, auth.uid(), now(), p_notes, now(), 'pro', true, '{}'::jsonb)
   on conflict (user_id) do update
     set is_pro = true,
         granted_by = auth.uid(),
         granted_at = now(),
         notes = excluded.notes,
-        updated_at = now();
+        updated_at = now(),
+        entitlement = 'pro',
+        is_active = true;
 end;
 $$;
 
@@ -90,13 +102,15 @@ begin
     raise exception 'Admin only';
   end if;
 
-  insert into public.user_entitlements (user_id, is_pro, granted_by, granted_at, updated_at)
-  values (p_user_id, false, auth.uid(), now(), now())
+  insert into public.user_entitlements (user_id, is_pro, granted_by, granted_at, updated_at, entitlement, is_active, metadata)
+  values (p_user_id, false, auth.uid(), now(), now(), 'pro', false, '{}'::jsonb)
   on conflict (user_id) do update
     set is_pro = false,
         granted_by = auth.uid(),
         granted_at = now(),
-        updated_at = now();
+        updated_at = now(),
+        entitlement = coalesce(public.user_entitlements.entitlement, 'pro'),
+        is_active = false;
 end;
 $$;
 
@@ -123,7 +137,7 @@ declare
 begin
   if v_uid is null then raise exception 'Not authenticated'; end if;
   select coalesce(xp,0) into v_xp from public.profiles where id = v_uid;
-  if v_xp < 1000 then raise exception 'You need 1000 XP to create a squad'; end if;
+  if v_xp < 500 then raise exception 'You need 500 XP to create a squad'; end if;
   v_is_pro := public.has_pro_access(v_uid);
   if p_min_xp_required > 0 and not v_is_pro then
     raise exception 'Only SpotUp Pro can set a minimum XP requirement';

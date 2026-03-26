@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
-import { SportSelector } from '@/components/SportSelector';
 import { GameCard } from '@/components/GameCard';
 import { GoogleMap } from '@/components/GoogleMap';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ArrowLeft, Filter, Navigation, X, Key } from 'lucide-react';
-import { Game, SkillLevel, SKILL_LEVELS } from '@/types';
+import { Game, SkillLevel, SKILL_LEVELS, SPORTS, Sport } from '@/types';
 import { hasGoogleMapsKey } from '@/lib/env';
 import { getBrowserLocation, LatLng } from '@/lib/geo';
+import { shouldShowGameOnHome } from '@/lib/gameVisibility';
 
 export default function MapView() {
   const navigate = useNavigate();
@@ -32,26 +32,26 @@ export default function MapView() {
       mounted = false;
     };
   }, []);
+
+  const nowMs = Date.now();
+
   const filteredGames = useMemo(() => {
-    return games.filter(game => {
+    return games.filter((game) => {
+      if (!shouldShowGameOnHome(game, nowMs)) return false;
       if (selectedSport !== 'all' && game.sport !== selectedSport) return false;
       if (skillFilter !== 'all' && game.skillRequirement !== skillFilter) return false;
       if (privacyFilter === 'public' && game.isPrivate) return false;
       if (privacyFilter === 'private' && !game.isPrivate) return false;
       return true;
     });
-  }, [games, selectedSport, skillFilter, privacyFilter]);
+  }, [games, selectedSport, skillFilter, privacyFilter, nowMs]);
 
   return (
     <div className="min-h-screen bg-background pb-20">
-      {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-b from-background via-background/95 to-transparent">
         <div className="px-4 py-3 safe-top">
           <div className="flex items-center gap-3 mb-3">
-            <button
-              onClick={() => navigate('/')}
-              className="p-2 rounded-xl bg-secondary/80 backdrop-blur-sm"
-            >
+            <button onClick={() => navigate('/')} className="p-2 rounded-xl bg-secondary/80 backdrop-blur-sm">
               <ArrowLeft className="w-5 h-5" />
             </button>
             <h1 className="text-lg font-bold flex-1">Find Games</h1>
@@ -65,18 +65,27 @@ export default function MapView() {
               )}
             </button>
           </div>
-          <SportSelector
-            selected={selectedSport}
-            onChange={setSelectedSport}
-            showAll
-          />
+
+          <div className="max-w-xs">
+            <Select value={selectedSport} onValueChange={(value) => setSelectedSport(value as Sport | 'all')}>
+              <SelectTrigger className="h-11 rounded-xl bg-card/90 border-border/60">
+                <SelectValue placeholder="All sports" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All sports</SelectItem>
+                {SPORTS.map((sport) => (
+                  <SelectItem key={sport.id} value={sport.id}>
+                    {sport.icon} {sport.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </header>
 
-      {/* Map Area */}
       <div className="relative h-screen pt-32">
         {!hasGoogleMapsKey ? (
-          /* API Key Missing */
           <div className="flex flex-col items-center justify-center h-full px-6 bg-secondary/30">
             <div className="glass-card p-6 w-full max-w-md space-y-4">
               <div className="flex items-center gap-3 text-primary">
@@ -94,7 +103,6 @@ export default function MapView() {
             </div>
           </div>
         ) : (
-          /* Google Map */
           <div className="absolute inset-0 pt-32">
             <GoogleMap
               games={filteredGames}
@@ -102,8 +110,7 @@ export default function MapView() {
               onGameSelect={setSelectedGame}
               center={center}
             />
-            
-            {/* Locate me button */}
+
             <button
               onClick={() => {
                 void getBrowserLocation().then(setCenter).catch(() => undefined);
@@ -114,7 +121,6 @@ export default function MapView() {
               <Navigation className="w-5 h-5 text-primary" />
             </button>
 
-            {/* Game count badge */}
             <div className="absolute bottom-32 left-4 glass-card px-4 py-2 z-30">
               <p className="text-sm">
                 <span className="font-bold text-primary">{filteredGames.length}</span>
@@ -125,7 +131,6 @@ export default function MapView() {
         )}
       </div>
 
-      {/* Game Detail Sheet */}
       <Sheet open={!!selectedGame} onOpenChange={() => setSelectedGame(null)}>
         <SheetContent side="bottom" className="bg-card border-border/50 rounded-t-3xl max-h-[70vh]">
           <SheetHeader className="sr-only">
@@ -135,8 +140,8 @@ export default function MapView() {
             <div className="py-2">
               <GameCard game={selectedGame} viewerUserId={user?.id} />
               <div className="flex gap-3 mt-4">
-                <Button 
-                  variant="default" 
+                <Button
+                  variant="default"
                   className="flex-1"
                   onClick={() => navigate(`/game/${selectedGame.id}`)}
                 >
@@ -151,7 +156,6 @@ export default function MapView() {
         </SheetContent>
       </Sheet>
 
-      {/* Filters Sheet */}
       <Sheet open={showFilters} onOpenChange={setShowFilters}>
         <SheetContent side="bottom" className="bg-card border-border/50 rounded-t-3xl">
           <SheetHeader>
@@ -164,16 +168,14 @@ export default function MapView() {
           </SheetHeader>
           <div className="py-6 space-y-6">
             <div>
-              <label className="text-sm font-medium text-muted-foreground mb-2 block">
-                Skill Level
-              </label>
-              <Select value={skillFilter} onValueChange={(v) => setSkillFilter(v as any)}>
+              <label className="text-sm font-medium text-muted-foreground mb-2 block">Skill Level</label>
+              <Select value={skillFilter} onValueChange={(v) => setSkillFilter(v as SkillLevel | 'all')}>
                 <SelectTrigger className="bg-secondary border-border">
                   <SelectValue placeholder="All levels" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Levels</SelectItem>
-                  {SKILL_LEVELS.map(level => (
+                  {SKILL_LEVELS.map((level) => (
                     <SelectItem key={level.id} value={level.id}>{level.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -181,11 +183,9 @@ export default function MapView() {
             </div>
 
             <div>
-              <label className="text-sm font-medium text-muted-foreground mb-2 block">
-                Privacy
-              </label>
+              <label className="text-sm font-medium text-muted-foreground mb-2 block">Privacy</label>
               <div className="flex gap-2">
-                {(['all', 'public', 'private'] as const).map(option => (
+                {(['all', 'public', 'private'] as const).map((option) => (
                   <Button
                     key={option}
                     variant={privacyFilter === option ? 'default' : 'outline'}

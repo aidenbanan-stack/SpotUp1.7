@@ -37,21 +37,16 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     const loadProfile = async () => {
       try {
         setProfileLoading(true);
-
         const profile = await getOrCreateMyProfile();
         if (!mounted) return;
         setUser(profile);
 
-        const { data: bonusClaimed, error: bonusError } = await supabase.rpc("claim_daily_login_bonus");
-
+        const { data: bonusClaimed, error: bonusError } = await supabase.rpc('claim_daily_login_bonus');
         if (bonusError) {
-          const message = (bonusError as any)?.message ?? "";
-          const missingFn =
-            message.toLowerCase().includes("function") &&
-            message.toLowerCase().includes("does not exist");
-
+          const message = (bonusError as any)?.message ?? '';
+          const missingFn = message.toLowerCase().includes('function') && message.toLowerCase().includes('does not exist');
           if (!missingFn) {
-            console.warn("[Supabase] daily bonus claim failed:", bonusError.message);
+            console.warn('[Supabase] daily bonus claim failed:', bonusError.message);
           }
         } else {
           const refreshed = await getOrCreateMyProfile();
@@ -66,8 +61,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
           if (claimed && gained > 0) {
             clearToastTimer();
-
-            // Delay slightly so the app finishes rendering after auth/profile bootstrap
             toastTimerRef.current = window.setTimeout(() => {
               if (!mounted) return;
               showDailyLoginToast(gained, refreshed.xp ?? 0);
@@ -97,6 +90,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
         if (!sessionExists) {
           setUser(null);
+          didBootstrapRef.current = false;
           return;
         }
 
@@ -125,7 +119,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Avoid double-running bootstrap on initial mount
       if (!didBootstrapRef.current) {
         didBootstrapRef.current = true;
         void loadProfile();
@@ -149,7 +142,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (!hasSession) return <SignIn />;
 
-  // Force onboarding (but allow staying on onboarding route)
   if (user && user.onboardingCompleted === false && location.pathname !== "/onboarding") {
     return <Navigate to="/onboarding" replace />;
   }

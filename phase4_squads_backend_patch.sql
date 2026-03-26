@@ -163,8 +163,8 @@ begin
   from public.profiles
   where id = v_uid;
 
-  if v_xp < 1000 then
-    raise exception 'You need 1000 XP to create a squad';
+  if v_xp < 500 then
+    raise exception 'You need 500 XP to create a squad';
   end if;
 
   v_is_pro := public.has_spotup_pro(v_uid);

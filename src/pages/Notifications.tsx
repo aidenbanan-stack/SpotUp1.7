@@ -90,19 +90,19 @@ export default function Notifications() {
   };
 
   const markAllAsRead = async () => {
-  try {
-    await Promise.all(
-      notifications
-        .filter((n) => !n.read)
-        .map((n) => markNotificationRead(n.id))
-    );
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    toast.success('Marked all as read.');
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Failed to mark all as read.';
-    toast.error(msg);
-  }
-};
+    try {
+      await Promise.all(
+        notifications
+          .filter((n) => !n.read)
+          .map((n) => markNotificationRead(n.id))
+      );
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      toast.success('Marked all as read.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to mark all as read.';
+      toast.error(msg);
+    }
+  };
 
   const getNotificationIcon = (type: string) => {
     switch (type) {

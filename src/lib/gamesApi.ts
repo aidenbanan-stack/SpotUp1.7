@@ -162,6 +162,34 @@ export async function updateGame(
   gameId: string,
   patch: Partial<Pick<Game, 'sport' | 'title' | 'description' | 'dateTime' | 'duration' | 'skillRequirement' | 'maxPlayers' | 'isPrivate' | 'location'>>
 ): Promise<Game> {
+  const rpcPayload = {
+    p_game_id: gameId,
+    p_sport: patch.sport ?? null,
+    p_title: patch.title ?? null,
+    p_description: patch.description !== undefined ? (patch.description || null) : null,
+    p_date_time: patch.dateTime ? patch.dateTime.toISOString() : null,
+    p_duration: patch.duration ?? null,
+    p_skill_requirement: patch.skillRequirement ?? null,
+    p_max_players: patch.maxPlayers ?? null,
+    p_is_private: patch.isPrivate ?? null,
+    p_location_latitude: patch.location?.latitude ?? null,
+    p_location_longitude: patch.location?.longitude ?? null,
+    p_location_area_name: patch.location?.areaName ?? null,
+  };
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc('update_game_secure', rpcPayload).single();
+
+  if (!rpcError && rpcData) {
+    return await hydrateGame(rowToGame(rpcData as GameRow));
+  }
+
+  const rpcMessage = (rpcError as any)?.message?.toLowerCase?.() ?? '';
+  const rpcMissing = rpcMessage.includes('function') && rpcMessage.includes('does not exist');
+
+  if (!rpcMissing && rpcError) {
+    throw rpcError;
+  }
+
   const updateRow: any = {};
 
   if (patch.sport) updateRow.sport = patch.sport;

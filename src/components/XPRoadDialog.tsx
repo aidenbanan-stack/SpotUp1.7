@@ -113,14 +113,14 @@ export function XPRoadDialog({ open, onOpenChange }: { open: boolean; onOpenChan
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[min(92vw,760px)] max-w-none p-0 max-h-[90vh] overflow-hidden">
         <DialogHeader className="px-5 pt-5 pb-3 border-b border-border/50">
-          <div className="flex items-start justify-between gap-4">
+          <div className="space-y-3 pr-10">
             <div>
               <DialogTitle className="text-xl">XP Road</DialogTitle>
               <p className="text-sm text-muted-foreground mt-1">
                 Track your progression across {sportLabel.toLowerCase()}.
               </p>
             </div>
-            <div className="min-w-[180px]">
+            <div className="w-full sm:w-[220px]">
               <Select value={sportFilter} onValueChange={(v) => setSportFilter(v as SportFilter)}>
                 <SelectTrigger>
                   <SelectValue placeholder="All sports" />
@@ -138,27 +138,24 @@ export function XPRoadDialog({ open, onOpenChange }: { open: boolean; onOpenChan
           </div>
         </DialogHeader>
 
-        <div className="px-5 pb-5 pt-4 overflow-y-auto overscroll-contain" style={{ maxHeight: 'calc(90vh - 84px)' }}>
-          <div className="glass-card p-4 space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <Avatar className="w-12 h-12">
-                  <AvatarImage src={me.profilePhotoUrl} alt={me.username} />
-                  <AvatarFallback>{me.username.slice(0, 2).toUpperCase()}</AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="font-bold text-foreground">{me.username}</p>
-                  <p className="text-sm text-muted-foreground">Rank #{myPlacement} among friends</p>
-                </div>
+        <div className="overflow-y-auto max-h-[calc(90vh-96px)] px-5 py-5">
+          <div className="glass-card p-4">
+            <div className="flex items-center gap-3">
+              <Avatar className="w-16 h-16">
+                <AvatarImage src={me.profilePhotoUrl} alt={me.username} />
+                <AvatarFallback>{me.username.slice(0, 2).toUpperCase()}</AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <p className="text-2xl font-bold truncate">{me.username}</p>
+                <p className="text-sm text-muted-foreground">Rank #{myPlacement} among friends</p>
               </div>
-
               <div className="text-right">
                 <p className="text-sm text-muted-foreground">XP</p>
                 <p className="text-xl font-extrabold text-foreground">{myXP.toLocaleString()}</p>
               </div>
             </div>
 
-            <div>
+            <div className="mt-4">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">{myLevel.name}</span>
                 <span className="text-muted-foreground">{nextLevel ? nextLevel.name : 'Max Tier'}</span>
@@ -172,7 +169,7 @@ export function XPRoadDialog({ open, onOpenChange }: { open: boolean; onOpenChan
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
               <div className="rounded-2xl bg-secondary/50 p-3">
                 <p className="text-xs text-muted-foreground">Current tier</p>
                 <p className="font-semibold mt-1">{myLevel.icon} {myLevel.name}</p>
@@ -183,7 +180,7 @@ export function XPRoadDialog({ open, onOpenChange }: { open: boolean; onOpenChan
               </div>
               <div className="rounded-2xl bg-secondary/50 p-3">
                 <p className="text-xs text-muted-foreground">Squads unlock</p>
-                <p className="font-semibold mt-1">{myXP >= 300 ? 'Unlocked' : `${300 - myXP} XP away`}</p>
+                <p className="font-semibold mt-1">{myXP >= 500 ? 'Unlocked' : `${500 - myXP} XP away`}</p>
               </div>
             </div>
           </div>
