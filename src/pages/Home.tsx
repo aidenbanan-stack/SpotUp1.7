@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/select';
 import { GameCard } from '@/components/GameCard';
 import { XPRoadDialog } from '@/components/XPRoadDialog';
-import { Bell, MapPin, Plus, User, History, MessageCircle, Users2 } from 'lucide-react';
+import { Bell, MapPin, Plus, User, History, MessageCircle, Trophy } from 'lucide-react';
 import { SPORTS, Sport } from '@/types';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import { fetchMyConversations } from '@/lib/messagesApi';
@@ -125,11 +125,11 @@ const nowMs = Date.now();
             </button>
 
             <button
-              onClick={() => navigate('/squads')}
+              onClick={() => navigate('/tournaments')}
               className="p-2 rounded-xl bg-secondary/60 hover:bg-secondary transition-colors"
-              aria-label="Squads"
+              aria-label="Tournaments"
             >
-              <Users2 className="w-5 h-5 text-foreground" />
+              <Trophy className="w-5 h-5 text-foreground" />
             </button>
 
             <button
