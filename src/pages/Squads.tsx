@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, MapPin, Plus, Search, ShieldCheck, Swords, Users } from 'lucide-react';
+import { ArrowLeft, Flag, MapPin, Plus, Search, ShieldCheck, Sparkles, Swords, Trophy, Users } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import type { Sport } from '@/types';
 import { SPORTS } from '@/types';
@@ -224,14 +224,32 @@ export default function Squads() {
       </header>
 
       <main className="px-4 py-5 max-w-3xl mx-auto space-y-4">
-        <div className="glass-card p-5 text-center">
-          <p className="font-semibold">Squad requirements</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            Join at 500 XP. Create at 500 XP. Squads cap at 10 members. Competitive rankings favor points and record, with XP as a secondary signal.
-          </p>
-          <p className="text-xs text-muted-foreground mt-2">
-            You currently have {(user?.xp ?? 0).toLocaleString()} XP{user?.city ? ` • Area: ${user.city}` : ''}.
-          </p>
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="glass-card p-5 text-center">
+            <p className="font-semibold">Squad requirements</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Join at 500 XP. Create at 500 XP. Squads cap at 10 members. Competitive rankings favor points, rating, and long-term consistency.
+            </p>
+            <p className="text-xs text-muted-foreground mt-2">
+              You currently have {(user?.xp ?? 0).toLocaleString()} XP{user?.city ? ` • Area: ${user.city}` : ''}.
+            </p>
+          </div>
+          <div className="glass-card p-5">
+            <div className="flex items-center gap-2 font-semibold"><Sparkles className="w-4 h-4 text-primary" /> What squads now include</div>
+            <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+              <div>Identity, ranking, and local discovery</div>
+              <div>Role-based membership structure</div>
+              <div>Match history, rivalries, and squad feed</div>
+            </div>
+          </div>
+          <div className="glass-card p-5">
+            <div className="flex items-center gap-2 font-semibold"><Flag className="w-4 h-4 text-primary" /> Best use for squads</div>
+            <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+              <div>Local crews</div>
+              <div>Competitive friend groups</div>
+              <div>Tournament-ready teams</div>
+            </div>
+          </div>
         </div>
 
         <div className="flex gap-2">
@@ -342,6 +360,9 @@ export default function Squads() {
               <Label>Minimum XP to join</Label>
               <Input value={minJoinXp} onChange={(e) => setMinJoinXp(e.target.value.replace(/[^0-9]/g, ''))} placeholder="500" />
               <p className="text-xs text-muted-foreground">Pro-created squads can set this above 500. Free-created squads use 500 automatically.</p>
+            </div>
+            <div className="rounded-xl bg-secondary/40 p-3 text-xs text-muted-foreground">
+              This build is now structured so each squad can grow into a full team hub with members, rivalries, feed, season progress, events, and competitive history.
             </div>
             <Button onClick={onCreate} disabled={!newName.trim() || !createUnlocked} className="w-full">
               Create squad

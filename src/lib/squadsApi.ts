@@ -15,6 +15,15 @@ export type SquadRow = {
   points?: number;
   rating?: number;
   home_area?: string | null;
+  description?: string | null;
+  visibility?: 'public' | 'request' | 'invite_only' | null;
+  vibe?: 'casual' | 'competitive' | 'balanced' | null;
+  weekly_goal?: number | null;
+  primary_color?: string | null;
+  secondary_color?: string | null;
+  home_court?: string | null;
+  recruiting?: boolean | null;
+  reliability_min?: number | null;
 };
 
 export type SquadWithMeta = SquadRow & {
@@ -52,6 +61,73 @@ export type SquadLeaderboardRow = {
   home_area: string | null;
   created_at: string;
 };
+
+export type SquadFeedItem = {
+  id: string;
+  type: 'announcement' | 'match' | 'milestone' | 'member' | 'event' | 'rivalry';
+  title: string;
+  body: string;
+  created_at: string;
+  accent?: string;
+};
+
+export type SquadMatchHistoryRow = {
+  id: string;
+  squad_a_id: string;
+  squad_b_id: string;
+  winner_squad_id: string;
+  loser_squad_id: string;
+  points_awarded: number;
+  recorded_at: string;
+  notes: string | null;
+  opponent_name: string;
+  outcome: 'win' | 'loss';
+};
+
+export type SquadRivalry = {
+  squad_id: string;
+  opponent_name: string;
+  wins: number;
+  losses: number;
+  total_matches: number;
+  status: 'heated' | 'active' | 'emerging';
+};
+
+export type SquadEventCard = {
+  id: string;
+  title: string;
+  kind: 'practice' | 'scrimmage' | 'tryout' | 'tournament' | 'hangout';
+  starts_at: string;
+  attendee_count: number;
+  location: string;
+};
+
+function normalizeSquadRow(row: any): SquadRow {
+  return {
+    id: row.id,
+    name: row.name,
+    sport: row.sport ?? null,
+    owner_id: row.owner_id ?? null,
+    invite_code: row.invite_code,
+    created_at: row.created_at,
+    wins: Number(row.wins ?? 0),
+    losses: Number(row.losses ?? 0),
+    points: Number(row.points ?? 0),
+    rating: Number(row.rating ?? 1000),
+    home_area: row.home_area ?? null,
+    min_xp_required: Number(row.min_xp_required ?? 0),
+    member_limit: Number(row.member_limit ?? 10),
+    description: row.description ?? null,
+    visibility: row.visibility ?? null,
+    vibe: row.vibe ?? null,
+    weekly_goal: row.weekly_goal != null ? Number(row.weekly_goal) : null,
+    primary_color: row.primary_color ?? null,
+    secondary_color: row.secondary_color ?? null,
+    home_court: row.home_court ?? null,
+    recruiting: row.recruiting ?? null,
+    reliability_min: row.reliability_min != null ? Number(row.reliability_min) : null,
+  };
+}
 
 function rowToLeaderboard(row: any): SquadLeaderboardRow {
   const wins = Number(row.wins ?? 0);
@@ -111,7 +187,7 @@ export async function fetchMySquads(userId: string): Promise<SquadWithMeta[]> {
   );
 
   return (squads ?? []).map((s: any) => ({
-    ...(s as SquadRow),
+    ...normalizeSquadRow(s),
     member_count: countMap.get(s.id) ?? 1,
     is_owner: ownerSet.has(s.id),
   }));
@@ -158,19 +234,7 @@ export async function searchSquads(args: {
   const memberSet = new Set((myMemberships ?? []).map((m: any) => m.squad_id as string));
 
   return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    sport: row.sport ?? null,
-    owner_id: row.owner_id ?? null,
-    invite_code: row.invite_code,
-    created_at: row.created_at,
-    wins: Number(row.wins ?? 0),
-    losses: Number(row.losses ?? 0),
-    points: Number(row.points ?? 0),
-    rating: Number(row.rating ?? 1000),
-    home_area: row.home_area ?? null,
-    min_xp_required: Number(row.min_xp_required ?? 0),
-    member_limit: Number(row.member_limit ?? 10),
+    ...normalizeSquadRow(row),
     member_count: Number(row.member_count ?? 0),
     is_nearby: Boolean(row.is_nearby),
     is_member: memberSet.has(row.id),
@@ -205,7 +269,7 @@ export async function deleteSquadById(args: { squadId: string }): Promise<void> 
 export async function fetchSquadById(squadId: string): Promise<SquadRow> {
   const { data, error } = await supabase.from('squads').select('*').eq('id', squadId).single();
   if (error) throw error;
-  return data as SquadRow;
+  return normalizeSquadRow(data);
 }
 
 export async function fetchSquadMembers(squadId: string): Promise<SquadMemberProfile[]> {
@@ -228,6 +292,130 @@ export async function fetchSquadMembers(squadId: string): Promise<SquadMemberPro
       level: Math.max(1, Math.floor((Number.isFinite(xp) ? xp : 0) / 100) + 1),
     } as SquadMemberProfile;
   });
+}
+
+export async function fetchSquadMatchHistory(squadId: string): Promise<SquadMatchHistoryRow[]> {
+  try {
+    const { data, error } = await supabase
+      .from('squad_match_results')
+      .select('id, squad_a_id, squad_b_id, winner_squad_id, loser_squad_id, points_awarded, recorded_at, notes')
+      .or(`squad_a_id.eq.${squadId},squad_b_id.eq.${squadId}`)
+      .order('recorded_at', { ascending: false })
+      .limit(20);
+
+    if (error) throw error;
+    const opponentIds = Array.from(new Set((data ?? []).flatMap((row: any) => [row.squad_a_id, row.squad_b_id]).filter((sid: string) => sid && sid !== squadId)));
+    let opponentMap = new Map<string, string>();
+    if (opponentIds.length > 0) {
+      const { data: squads } = await supabase.from('squads').select('id, name').in('id', opponentIds);
+      opponentMap = new Map((squads ?? []).map((row: any) => [row.id as string, row.name as string]));
+    }
+    return (data ?? []).map((row: any) => {
+      const opponentId = row.squad_a_id === squadId ? row.squad_b_id : row.squad_a_id;
+      return {
+        id: row.id,
+        squad_a_id: row.squad_a_id,
+        squad_b_id: row.squad_b_id,
+        winner_squad_id: row.winner_squad_id,
+        loser_squad_id: row.loser_squad_id,
+        points_awarded: Number(row.points_awarded ?? 0),
+        recorded_at: row.recorded_at,
+        notes: row.notes ?? null,
+        opponent_name: opponentMap.get(opponentId) ?? 'Opponent Squad',
+        outcome: row.winner_squad_id === squadId ? 'win' : 'loss',
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchSquadRivalries(squadId: string): Promise<SquadRivalry[]> {
+  const matches = await fetchSquadMatchHistory(squadId);
+  const byOpponent = new Map<string, SquadRivalry>();
+  for (const match of matches) {
+    const key = match.opponent_name;
+    const cur = byOpponent.get(key) ?? {
+      squad_id: squadId,
+      opponent_name: match.opponent_name,
+      wins: 0,
+      losses: 0,
+      total_matches: 0,
+      status: 'emerging' as const,
+    };
+    cur.total_matches += 1;
+    if (match.outcome === 'win') cur.wins += 1;
+    else cur.losses += 1;
+    cur.status = cur.total_matches >= 4 ? 'heated' : cur.total_matches >= 2 ? 'active' : 'emerging';
+    byOpponent.set(key, cur);
+  }
+  return [...byOpponent.values()].sort((a, b) => b.total_matches - a.total_matches);
+}
+
+export async function fetchSquadEvents(squadId: string): Promise<SquadEventCard[]> {
+  try {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('games')
+      .select('id, title, starts_at, date_time, location_name, location_area_name, player_ids, description')
+      .contains('player_ids', [squadId])
+      .gte('date_time', now)
+      .order('date_time', { ascending: true })
+      .limit(6);
+    if (error) throw error;
+    return (data ?? []).map((row: any) => ({
+      id: row.id,
+      title: row.title ?? 'Squad Run',
+      kind: /tryout/i.test(row.description ?? '') ? 'tryout' : /scrimmage/i.test(row.description ?? '') ? 'scrimmage' : 'practice',
+      starts_at: row.starts_at ?? row.date_time,
+      attendee_count: Array.isArray(row.player_ids) ? row.player_ids.length : 0,
+      location: row.location_name ?? row.location_area_name ?? 'TBD',
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchSquadFeed(args: {
+  squad: SquadRow;
+  members: SquadMemberProfile[];
+  matches?: SquadMatchHistoryRow[];
+}): Promise<SquadFeedItem[]> {
+  const feed: SquadFeedItem[] = [];
+  const createdAt = args.squad.created_at;
+  feed.push({
+    id: `created-${args.squad.id}`,
+    type: 'milestone',
+    title: `${args.squad.name} was formed`,
+    body: `Invite code ${args.squad.invite_code} is live. Build your local crew and climb the ladder.`,
+    created_at: createdAt,
+    accent: 'bg-blue-500/15 text-blue-700',
+  });
+
+  const sortedMembers = [...args.members].sort((a, b) => (b.xp ?? 0) - (a.xp ?? 0));
+  if (sortedMembers[0]) {
+    feed.push({
+      id: `top-${sortedMembers[0].user_id}`,
+      type: 'member',
+      title: `${sortedMembers[0].username ?? 'A member'} leads the squad`,
+      body: `Current top contributor with ${sortedMembers[0].xp.toLocaleString()} XP and level ${sortedMembers[0].level}.`,
+      created_at: new Date().toISOString(),
+      accent: 'bg-amber-500/15 text-amber-700',
+    });
+  }
+
+  for (const match of (args.matches ?? []).slice(0, 4)) {
+    feed.push({
+      id: `match-${match.id}`,
+      type: 'match',
+      title: `${match.outcome === 'win' ? 'Victory' : 'Tough loss'} vs ${match.opponent_name}`,
+      body: `${match.outcome === 'win' ? 'Gained' : 'Played for'} ${match.points_awarded} competitive points.${match.notes ? ` ${match.notes}` : ''}`,
+      created_at: match.recorded_at,
+      accent: match.outcome === 'win' ? 'bg-emerald-500/15 text-emerald-700' : 'bg-rose-500/15 text-rose-700',
+    });
+  }
+
+  return feed.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
 }
 
 export async function fetchSquadLeaderboard(limit = 50): Promise<SquadLeaderboardRow[]> {
@@ -261,9 +449,13 @@ export async function fetchSquadLeaderboard(limit = 50): Promise<SquadLeaderboar
         created_at: (s as any).created_at,
       }));
     } catch {
-      // ignore
+      out.push(rowToLeaderboard({
+        ...(s as any),
+        squad_id: (s as any).id,
+        member_count: 0,
+        total_xp: 0,
+      }));
     }
   }
-  out.sort((a, b) => (b.rating - a.rating) || (b.points - a.points) || (b.total_xp - a.total_xp));
-  return out;
+  return out.sort((a, b) => (b.rating - a.rating) || (b.points - a.points) || (b.total_xp - a.total_xp)).slice(0, limit);
 }
