@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/lib/supabaseClient";
 import { useApp } from "@/context/AppContext";
@@ -21,23 +21,37 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   const { user, setUser } = useApp();
 
+  const didBootstrapRef = useRef(false);
+  const toastTimerRef = useRef<number | null>(null);
+
   useEffect(() => {
     let mounted = true;
+
+    const clearToastTimer = () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
+    };
 
     const loadProfile = async () => {
       try {
         setProfileLoading(true);
+
         const profile = await getOrCreateMyProfile();
         if (!mounted) return;
         setUser(profile);
 
-        const { data: bonusClaimed, error: bonusError } = await supabase.rpc('claim_daily_login_bonus');
+        const { data: bonusClaimed, error: bonusError } = await supabase.rpc("claim_daily_login_bonus");
+
         if (bonusError) {
-          const message = (bonusError as any)?.message ?? '';
-          const missingFn = message.toLowerCase().includes('function') && message.toLowerCase().includes('does not exist');
+          const message = (bonusError as any)?.message ?? "";
+          const missingFn =
+            message.toLowerCase().includes("function") &&
+            message.toLowerCase().includes("does not exist");
+
           if (!missingFn) {
-            // eslint-disable-next-line no-console
-            console.warn('[Supabase] daily bonus claim failed:', bonusError.message);
+            console.warn("[Supabase] daily bonus claim failed:", bonusError.message);
           }
         } else {
           const refreshed = await getOrCreateMyProfile();
@@ -50,12 +64,17 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
           setUser(refreshed);
 
-          if (claimed) {
-            showDailyLoginToast(gained, refreshed.xp ?? 0);
+          if (claimed && gained > 0) {
+            clearToastTimer();
+
+            // Delay slightly so the app finishes rendering after auth/profile bootstrap
+            toastTimerRef.current = window.setTimeout(() => {
+              if (!mounted) return;
+              showDailyLoginToast(gained, refreshed.xp ?? 0);
+            }, 450);
           }
         }
       } catch (e) {
-        // eslint-disable-next-line no-console
         console.warn("[Supabase] profile load failed:", e);
         if (mounted) setUser(null);
       } finally {
@@ -69,7 +88,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         if (!mounted) return;
 
         if (error) {
-          // eslint-disable-next-line no-console
           console.warn("[Supabase] getSession error:", error.message);
         }
 
@@ -82,10 +100,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        void loadProfile();
+        if (!didBootstrapRef.current) {
+          didBootstrapRef.current = true;
+          void loadProfile();
+        }
       })
       .catch((err) => {
-        // eslint-disable-next-line no-console
         console.warn("[Supabase] getSession threw:", err);
         setUser(null);
         setHasSession(false);
@@ -100,14 +120,21 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
       if (!sessionExists) {
         setUser(null);
+        didBootstrapRef.current = false;
+        clearToastTimer();
         return;
       }
 
-      void loadProfile();
+      // Avoid double-running bootstrap on initial mount
+      if (!didBootstrapRef.current) {
+        didBootstrapRef.current = true;
+        void loadProfile();
+      }
     });
 
     return () => {
       mounted = false;
+      clearToastTimer();
       sub.subscription.unsubscribe();
     };
   }, [setUser]);
