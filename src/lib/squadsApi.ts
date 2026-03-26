@@ -8,13 +8,27 @@ export type SquadRow = {
   owner_id: string | null;
   invite_code: string;
   created_at: string;
-  min_xp_required?: number;
-  member_limit?: number;
+  wins?: number;
+  losses?: number;
+  points?: number;
+  rating?: number;
+  home_area?: string | null;
+  min_join_xp?: number;
+  member_cap?: number;
+  is_recruiting?: boolean;
 };
 
 export type SquadWithMeta = SquadRow & {
   member_count: number;
   is_owner: boolean;
+};
+
+export type SquadDiscoverRow = SquadRow & {
+  member_count: number;
+  owner_username: string | null;
+  owner_city: string | null;
+  is_member: boolean;
+  can_join: boolean;
 };
 
 export type SquadMemberProfile = {
@@ -26,15 +40,43 @@ export type SquadMemberProfile = {
   level: number;
 };
 
-function makeInviteCode(len = 6): string {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
-  let out = '';
-  for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return out;
+export type SquadLeaderboardRow = {
+  squad_id: string;
+  name: string;
+  sport: Sport | null;
+  member_count: number;
+  total_xp: number;
+  wins: number;
+  losses: number;
+  points: number;
+  rating: number;
+  win_pct: number;
+  home_area: string | null;
+  created_at: string;
+};
+
+function rowToLeaderboard(row: any): SquadLeaderboardRow {
+  const wins = Number(row.wins ?? 0);
+  const losses = Number(row.losses ?? 0);
+  const totalGames = wins + losses;
+  const winPct = totalGames > 0 ? wins / totalGames : 0;
+  return {
+    squad_id: row.squad_id ?? row.id,
+    name: row.name,
+    sport: row.sport ?? null,
+    member_count: Number(row.member_count ?? 0),
+    total_xp: Number(row.total_xp ?? 0),
+    wins,
+    losses,
+    points: Number(row.points ?? 0),
+    rating: Number(row.rating ?? 1000),
+    win_pct: typeof row.win_pct === 'number' ? row.win_pct : winPct,
+    home_area: row.home_area ?? null,
+    created_at: row.created_at,
+  };
 }
 
 export async function fetchMySquads(userId: string): Promise<SquadWithMeta[]> {
-  // Get squads where user is a member
   const { data: memberships, error: memErr } = await supabase
     .from('squad_members')
     .select('squad_id, role')
@@ -46,13 +88,12 @@ export async function fetchMySquads(userId: string): Promise<SquadWithMeta[]> {
 
   const { data: squads, error: sErr } = await supabase
     .from('squads')
-    .select('id,name,sport,owner_id,invite_code,created_at,min_xp_required,member_limit')
+    .select('*')
     .in('id', squadIds)
     .order('created_at', { ascending: false });
 
   if (sErr) throw sErr;
 
-  // Member counts
   const { data: counts, error: cErr } = await supabase
     .from('squad_members')
     .select('squad_id')
@@ -79,34 +120,96 @@ export async function fetchMySquads(userId: string): Promise<SquadWithMeta[]> {
   }));
 }
 
-export async function createSquad(args: { userId: string; name: string; sport: Sport | null; minXpRequired?: number }): Promise<SquadRow> {
-  const { data, error } = await supabase
-    .rpc('create_squad_secure', {
-      p_name: args.name.trim(),
-      p_sport: args.sport,
-      p_min_xp_required: Math.max(0, Number(args.minXpRequired ?? 0)),
-    })
-    .single();
+export async function createSquad(args: {
+  userId: string;
+  name: string;
+  sport: Sport | null;
+  minJoinXp?: number;
+}): Promise<SquadRow> {
+  const { data, error } = await supabase.rpc('create_squad_secure', {
+    p_name: args.name.trim(),
+    p_sport: args.sport,
+    p_min_join_xp: Math.max(0, Math.floor(args.minJoinXp ?? 0)),
+  });
 
   if (error) throw error;
-  return data as SquadRow;
+
+  const squadId = typeof data === 'string' ? data : data?.id ?? data;
+  if (!squadId) throw new Error('Could not create squad');
+  return fetchSquadById(String(squadId));
 }
 
-export async function joinSquadByCode(args: { userId: string; code: string }): Promise<SquadRow> {
-  const code = args.code.trim().toUpperCase();
-  const { data, error } = await supabase.rpc('join_squad_by_code_secure', { p_code: code }).single();
+export async function searchSquads(args: {
+  userId: string;
+  query?: string;
+  area?: string | null;
+  limit?: number;
+}): Promise<SquadDiscoverRow[]> {
+  const { data, error } = await supabase.rpc('search_squads', {
+    p_query: args.query?.trim() || null,
+    p_area: args.area?.trim() || null,
+    p_limit: args.limit ?? 20,
+  });
+
   if (error) throw error;
-  return data as SquadRow;
+
+  const rows = (data ?? []) as any[];
+  if (!rows.length) return [];
+
+  const { data: myMemberships } = await supabase
+    .from('squad_members')
+    .select('squad_id')
+    .eq('user_id', args.userId);
+
+  const memberSet = new Set((myMemberships ?? []).map((m: any) => m.squad_id as string));
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    sport: row.sport ?? null,
+    owner_id: row.owner_id ?? null,
+    invite_code: row.invite_code,
+    created_at: row.created_at,
+    wins: Number(row.wins ?? 0),
+    losses: Number(row.losses ?? 0),
+    points: Number(row.points ?? 0),
+    rating: Number(row.rating ?? 1000),
+    home_area: row.home_area ?? null,
+    min_join_xp: Number(row.min_join_xp ?? 0),
+    member_cap: Number(row.member_cap ?? 10),
+    is_recruiting: Boolean(row.is_recruiting ?? true),
+    member_count: Number(row.member_count ?? 0),
+    owner_username: row.owner_username ?? null,
+    owner_city: row.owner_city ?? null,
+    is_member: memberSet.has(row.id),
+    can_join: !memberSet.has(row.id) && Boolean(row.is_recruiting ?? true),
+  }));
+}
+
+export async function joinSquadById(args: { userId: string; squadId: string }): Promise<SquadRow> {
+  const { data, error } = await supabase.rpc('join_squad_secure', {
+    p_squad_id: args.squadId,
+  });
+
+  if (error) throw error;
+  const squadId = typeof data === 'string' ? data : data?.id ?? args.squadId;
+  return fetchSquadById(String(squadId));
+}
+
+export async function leaveSquadById(args: { squadId: string }): Promise<void> {
+  const { error } = await supabase.rpc('leave_squad_secure', {
+    p_squad_id: args.squadId,
+  });
+  if (error) throw error;
 }
 
 export async function fetchSquadById(squadId: string): Promise<SquadRow> {
-  const { data, error } = await supabase.from('squads').select('id,name,sport,owner_id,invite_code,created_at,min_xp_required,member_limit').eq('id', squadId).single();
+  const { data, error } = await supabase.from('squads').select('*').eq('id', squadId).single();
   if (error) throw error;
   return data as SquadRow;
 }
 
 export async function fetchSquadMembers(squadId: string): Promise<SquadMemberProfile[]> {
-  // role + profile
   const { data, error } = await supabase
     .from('squad_members')
     .select('squad_id, user_id, role, profiles:profiles(id, username, xp)')
@@ -128,43 +231,40 @@ export async function fetchSquadMembers(squadId: string): Promise<SquadMemberPro
   });
 }
 
-export type SquadLeaderboardRow = {
-  squad_id: string;
-  name: string;
-  sport: Sport | null;
-  member_count: number;
-  total_xp: number;
-  created_at: string;
-};
-
 export async function fetchSquadLeaderboard(limit = 50): Promise<SquadLeaderboardRow[]> {
-  // Prefer a SQL view if present.
   const { data, error } = await supabase
-    .from('squad_leaderboard')
+    .from('squad_competitive_leaderboard')
     .select('*')
-    .order('total_xp', { ascending: false })
+    .order('points', { ascending: false })
+    .order('rating', { ascending: false })
     .limit(limit);
-  if (!error) return (data ?? []) as SquadLeaderboardRow[];
 
-  // Fallback: compute client-side (slower, but works if view not installed).
+  if (!error) return (data ?? []).map(rowToLeaderboard);
+
   const { data: squads, error: sErr } = await supabase.from('squads').select('*').order('created_at', { ascending: false }).limit(limit);
   if (sErr) throw sErr;
+
   const out: SquadLeaderboardRow[] = [];
   for (const s of squads ?? []) {
     try {
       const members = await fetchSquadMembers((s as any).id);
-      out.push({
+      out.push(rowToLeaderboard({
         squad_id: (s as any).id,
         name: (s as any).name,
         sport: (s as any).sport ?? null,
         member_count: members.length,
         total_xp: members.reduce((sum, m) => sum + (m.xp ?? 0), 0),
+        wins: (s as any).wins ?? 0,
+        losses: (s as any).losses ?? 0,
+        points: (s as any).points ?? 0,
+        rating: (s as any).rating ?? 1000,
+        home_area: (s as any).home_area ?? null,
         created_at: (s as any).created_at,
-      });
+      }));
     } catch {
       // ignore
     }
   }
-  out.sort((a, b) => b.total_xp - a.total_xp);
+  out.sort((a, b) => (b.points - a.points) || (b.rating - a.rating) || (b.total_xp - a.total_xp));
   return out;
 }

@@ -1,6 +1,5 @@
 import { supabase } from '@/lib/supabaseClient';
 import { PLAYER_LEVELS, type PlayerLevel, type Sport, type User } from '@/types';
-import { fetchMyAccessState } from '@/lib/entitlementsApi';
 
 type PublicProfileRow = {
   id: string;
@@ -84,8 +83,6 @@ function profileToUser(row: ProfileRow): User {
     },
     votesReceived: { mostDominant: 0, winner: 0, bestTeammate: 0 },
     uniqueCourtsPlayed: 0,
-    isPro: false,
-    isAdmin: false,
   };
 }
 
@@ -114,8 +111,6 @@ function publicProfileToUser(row: PublicProfileRow): User {
     reliabilityStats: { showUps: 0, cancellations: 0, noShows: 0, score: 100 },
     votesReceived: { mostDominant: 0, winner: 0, bestTeammate: 0 },
     uniqueCourtsPlayed: 0,
-    isPro: false,
-    isAdmin: false,
   };
 }
 
@@ -157,11 +152,7 @@ export async function getOrCreateMyProfile(): Promise<User> {
     .maybeSingle();
 
   if (selErr) throw selErr;
-  if (existing) {
-    const baseUser = profileToUser(existing as ProfileRow);
-    const access = await fetchMyAccessState();
-    return { ...baseUser, isPro: access.is_pro, isAdmin: access.is_admin };
-  }
+  if (existing) return profileToUser(existing as ProfileRow);
 
   const insert: Partial<ProfileRow> = {
     id: me.id,
@@ -180,9 +171,7 @@ export async function getOrCreateMyProfile(): Promise<User> {
     .single();
 
   if (insErr) throw insErr;
-  const baseUser = profileToUser(created as ProfileRow);
-  const access = await fetchMyAccessState();
-  return { ...baseUser, isPro: access.is_pro, isAdmin: access.is_admin };
+  return profileToUser(created as ProfileRow);
 }
 
 /**

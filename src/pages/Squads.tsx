@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Users, Link as LinkIcon } from 'lucide-react';
+import { ArrowLeft, MapPin, Plus, Search, ShieldCheck, Swords, Users } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import type { Sport } from '@/types';
 import { SPORTS } from '@/types';
@@ -10,111 +10,196 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { createSquad, fetchMySquads, joinSquadByCode, type SquadWithMeta } from '@/lib/squadsApi';
+import {
+  createSquad,
+  fetchMySquads,
+  joinSquadById,
+  searchSquads,
+  type SquadDiscoverRow,
+  type SquadWithMeta,
+} from '@/lib/squadsApi';
 
 export default function Squads() {
   const navigate = useNavigate();
   const { user } = useApp();
 
-  const [loading, setLoading] = useState(true);
-  const [squads, setSquads] = useState<SquadWithMeta[]>([]);
-  const [q, setQ] = useState('');
-
-  const [tab, setTab] = useState<'my' | 'join'>('my');
-
+  const [loadingMy, setLoadingMy] = useState(true);
+  const [loadingDiscover, setLoadingDiscover] = useState(true);
+  const [mySquads, setMySquads] = useState<SquadWithMeta[]>([]);
+  const [discoverSquads, setDiscoverSquads] = useState<SquadDiscoverRow[]>([]);
+  const [search, setSearch] = useState('');
+  const [tab, setTab] = useState<'my' | 'discover'>('my');
   const [createOpen, setCreateOpen] = useState(false);
-  const [joinOpen, setJoinOpen] = useState(false);
-
   const [newName, setNewName] = useState('');
   const [newSport, setNewSport] = useState<Sport | 'none'>('none');
-  const [minXpRequired, setMinXpRequired] = useState('0');
-
-  const [code, setCode] = useState('');
+  const [minJoinXp, setMinJoinXp] = useState('0');
+  const [busyJoinId, setBusyJoinId] = useState<string | null>(null);
 
   const joinUnlocked = (user?.xp ?? 0) >= 500;
   const createUnlocked = (user?.xp ?? 0) >= 1000;
-
-  async function refresh() {
-    if (!user?.id) return;
-    setLoading(true);
-    try {
-      const data = await fetchMySquads(user.id);
-      setSquads(data);
-    } catch (e) {
-      console.error(e);
-      setSquads([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
-  const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    if (!term) return squads;
-    return squads.filter((s) => s.name.toLowerCase().includes(term));
-  }, [squads, q]);
+  const cityLabel = user?.city?.trim() || 'your area';
 
   const sportIcon = (sport: Sport | null) => {
     if (!sport) return '👥';
-    return (SPORTS as any)[sport]?.icon ?? '🏀';
+    return (SPORTS.find((s) => s.id === sport)?.icon) ?? '🏀';
   };
 
   const sportLabel = (sport: Sport | null) => {
     if (!sport) return 'Any sport';
-    return (SPORTS as any)[sport]?.label ?? sport;
+    return (SPORTS.find((s) => s.id === sport)?.name) ?? sport;
   };
+
+  async function refreshMySquads() {
+    if (!user?.id) return;
+    setLoadingMy(true);
+    try {
+      setMySquads(await fetchMySquads(user.id));
+    } catch (e) {
+      console.error(e);
+      setMySquads([]);
+    } finally {
+      setLoadingMy(false);
+    }
+  }
+
+  async function refreshDiscover(query?: string) {
+    if (!user?.id) return;
+    setLoadingDiscover(true);
+    try {
+      const data = await searchSquads({
+        userId: user.id,
+        query: query ?? search,
+        area: user?.city ?? null,
+        limit: 30,
+      });
+      setDiscoverSquads(data);
+    } catch (e) {
+      console.error(e);
+      setDiscoverSquads([]);
+    } finally {
+      setLoadingDiscover(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshMySquads();
+    void refreshDiscover('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      if (tab === 'discover') {
+        void refreshDiscover();
+      }
+    }, 250);
+    return () => window.clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, tab, user?.city]);
+
+  const areaSquads = useMemo(() => {
+    const city = (user?.city ?? '').trim().toLowerCase();
+    return discoverSquads.filter((s) => (s.home_area ?? s.owner_city ?? '').trim().toLowerCase() === city);
+  }, [discoverSquads, user?.city]);
+
+  const otherSquads = useMemo(() => {
+    const areaIds = new Set(areaSquads.map((s) => s.id));
+    return discoverSquads.filter((s) => !areaIds.has(s.id));
+  }, [areaSquads, discoverSquads]);
 
   async function onCreate() {
     if (!user?.id) return;
-    const name = newName.trim();
-    if (!name) return;
-
     try {
       const created = await createSquad({
         userId: user.id,
-        name,
+        name: newName.trim(),
         sport: newSport === 'none' ? null : (newSport as Sport),
-        minXpRequired: user.isPro ? Number(minXpRequired || '0') : 0,
+        minJoinXp: Number(minJoinXp || '0'),
       });
-
       setCreateOpen(false);
       setNewName('');
       setNewSport('none');
-      setMinXpRequired('0');
-
-      // Re-fetch to include member counts
-      await refresh();
-
-      // Copy invite code to clipboard as a helpful UX
-      try {
-        await navigator.clipboard.writeText(created.invite_code);
-      } catch {}
-    } catch (e) {
+      setMinJoinXp('0');
+      await refreshMySquads();
+      await refreshDiscover('');
+      navigate(`/squad/${created.id}`);
+    } catch (e: any) {
       console.error(e);
-      alert('Could not create squad. Check your Supabase tables / RLS.');
+      alert(e?.message ?? 'Could not create squad.');
     }
   }
 
-  async function onJoin() {
+  async function onJoin(squadId: string) {
     if (!user?.id) return;
-    const c = code.trim();
-    if (!c) return;
-
+    setBusyJoinId(squadId);
     try {
-      await joinSquadByCode({ userId: user.id, code: c });
-      setJoinOpen(false);
-      setCode('');
-      await refresh();
-    } catch (e) {
+      await joinSquadById({ userId: user.id, squadId });
+      await refreshMySquads();
+      await refreshDiscover(search);
+    } catch (e: any) {
       console.error(e);
-      alert('Could not join squad. Double-check the invite code and RLS.');
+      alert(e?.message ?? 'Could not join squad.');
+    } finally {
+      setBusyJoinId(null);
     }
   }
+
+  const SquadCard = ({ squad, showJoin }: { squad: SquadDiscoverRow | SquadWithMeta; showJoin?: boolean }) => {
+    const record = `${Number(squad.wins ?? 0)}-${Number(squad.losses ?? 0)}`;
+    const membersLabel = `${squad.member_count}/${Number(squad.member_cap ?? 10)}`;
+    const discover = squad as SquadDiscoverRow;
+    return (
+      <div className="glass-card p-4">
+        <div className="flex items-start justify-between gap-3">
+          <button className="min-w-0 flex-1 text-left" onClick={() => navigate(`/squad/${squad.id}`)}>
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-secondary/70 flex items-center justify-center text-lg border border-border/60">
+                {sportIcon(squad.sport ?? null)}
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <p className="font-semibold truncate">{squad.name}</p>
+                  {'is_owner' in squad && squad.is_owner ? (
+                    <span className="px-2 py-0.5 rounded-full bg-primary/15 text-primary text-xs">Owner</span>
+                  ) : null}
+                </div>
+                <p className="text-xs text-muted-foreground truncate">{sportLabel(squad.sport ?? null)}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {membersLabel}</span>
+                  <span className="inline-flex items-center gap-1"><Swords className="w-3.5 h-3.5" /> {record}</span>
+                  <span>{Number(squad.points ?? 0)} pts</span>
+                  <span>Rtg {Number(squad.rating ?? 1000)}</span>
+                </div>
+                {(squad.home_area || discover.owner_city) ? (
+                  <div className="mt-1 text-xs text-muted-foreground inline-flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5" /> {squad.home_area || discover.owner_city}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </button>
+          {showJoin ? (
+            discover.is_member ? (
+              <Button variant="secondary" disabled>Joined</Button>
+            ) : (
+              <Button
+                onClick={() => onJoin(squad.id)}
+                disabled={busyJoinId === squad.id || !discover.can_join || !joinUnlocked}
+              >
+                {busyJoinId === squad.id ? 'Joining...' : 'Join'}
+              </Button>
+            )
+          ) : null}
+        </div>
+
+        {'min_join_xp' in squad && Number(squad.min_join_xp ?? 0) > 0 ? (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Minimum XP to join: {Number(squad.min_join_xp ?? 0).toLocaleString()}
+          </p>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-background safe-top pb-24">
@@ -123,252 +208,144 @@ export default function Squads() {
           <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-secondary/60" aria-label="Back">
             <ArrowLeft className="w-5 h-5" />
           </button>
-
           <h1 className="text-xl font-bold">Squads</h1>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => joinUnlocked && setJoinOpen(true)}
-              className="p-2 rounded-xl bg-secondary/60"
-              aria-label="Join squad"
-              title="Join"
-            >
-              <LinkIcon className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => createUnlocked && setCreateOpen(true)}
-              className="p-2 rounded-xl bg-secondary/60"
-              aria-label="Create squad"
-              title="Create"
-            >
-              <Plus className="w-5 h-5" />
-            </button>
-          </div>
+          <button
+            onClick={() => createUnlocked && setCreateOpen(true)}
+            className="p-2 rounded-xl bg-secondary/60"
+            aria-label="Create squad"
+            title="Create"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
         </div>
       </header>
 
-      <main className="px-4 py-5 max-w-2xl mx-auto space-y-4">
+      <main className="px-4 py-5 max-w-3xl mx-auto space-y-4">
         <div className="glass-card p-5 text-center">
           <p className="font-semibold">Squad requirements</p>
-          <p className="text-sm text-muted-foreground mt-1">Join at 500 XP. Create at 1000 XP. Free players can join 1 squad and own 1 squad at a time. Pro players can join and create multiple squads.</p>
-          <p className="text-xs text-muted-foreground mt-2">You currently have {(user?.xp ?? 0).toLocaleString()} XP {user?.isPro ? '• SpotUp Pro active' : '• Free plan'}.</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Join at 500 XP. Create at 1000 XP. Squads cap at 10 members. Competitive rankings favor points and record, with XP as a secondary signal.
+          </p>
+          <p className="text-xs text-muted-foreground mt-2">
+            You currently have {(user?.xp ?? 0).toLocaleString()} XP{user?.city ? ` • Area: ${user.city}` : ''}.
+          </p>
         </div>
 
-        {/* Tabs (Clash Royale-ish) */}
         <div className="flex gap-2">
           <button
-            className={cn(
-              'flex-1 h-11 rounded-xl text-sm font-semibold transition',
-              tab === 'my' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-foreground',
-            )}
+            className={cn('flex-1 h-11 rounded-xl text-sm font-semibold transition', tab === 'my' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-foreground')}
             onClick={() => setTab('my')}
           >
             My Squads
           </button>
           <button
-            className={cn(
-              'flex-1 h-11 rounded-xl text-sm font-semibold transition',
-              tab === 'join' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-foreground',
-            )}
-            onClick={() => setTab('join')}
+            className={cn('flex-1 h-11 rounded-xl text-sm font-semibold transition', tab === 'discover' ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-foreground')}
+            onClick={() => setTab('discover')}
           >
-            Join Squad
+            Discover Squads
           </button>
         </div>
 
         {tab === 'my' ? (
-          <Input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search squads..."
-            className="bg-secondary/60"
-          />
-        ) : null}
-
-        {tab === 'join' ? (
-          <div className="glass-card p-5 space-y-4">
-            <div>
-              <p className="font-semibold">Join with invite code</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Just like clans, squads use invite codes. Ask the squad owner for theirs.
-              </p>
-            </div>
-
-            <div className="flex gap-2">
-              <Input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="Ex: K7P2QJ"
-                className="bg-secondary/60"
-                autoCapitalize="characters"
-              />
-              <Button onClick={onJoin} disabled={!code.trim() || !joinUnlocked} className="h-11">
-                Join
-              </Button>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">Invite codes are case-insensitive.</p>
-              <Button variant="secondary" onClick={() => createUnlocked && setCreateOpen(true)} disabled={!createUnlocked}>
-                Create squad
-              </Button>
-            </div>
-          </div>
-        ) : loading ? (
-          <div className="glass-card p-6 text-center">
-            <p className="text-sm text-muted-foreground">Loading squads...</p>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="glass-card p-6 text-center">
-            <p className="font-semibold">No squads yet</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Create one to play with friends, or join with an invite code.
-            </p>
-
-            <div className="mt-4 flex gap-2 justify-center">
-              <Button variant="secondary" onClick={() => joinUnlocked && setJoinOpen(true)} disabled={!joinUnlocked}>
-                Join
-              </Button>
-              <Button onClick={() => createUnlocked && setCreateOpen(true)} disabled={!createUnlocked}>Create</Button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {filtered.map((s) => (
-              <div key={s.id} className="glass-card p-4">
-                <button
-                  className="w-full text-left"
-                  onClick={() => navigate(`/squad/${s.id}`)}
-                  aria-label={`Open squad ${s.name}`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-11 h-11 rounded-2xl bg-secondary/60 flex items-center justify-center text-lg">
-                      {sportIcon(s.sport)}
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="font-semibold truncate">{s.name}</p>
-                      <p className="text-xs text-muted-foreground truncate">{sportLabel(s.sport)}</p>
-                      <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                        <Users className="w-3.5 h-3.5" />
-                        <span>{s.member_count} member{s.member_count === 1 ? '' : 's'}</span>
-                        {s.is_owner ? (
-                          <span className="px-2 py-0.5 rounded-full bg-primary/15 text-primary">Owner</span>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-2">
-                    <Button
-                      variant="secondary"
-                      className="h-9"
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        try {
-                          await navigator.clipboard.writeText(s.invite_code);
-                          alert('Invite code copied!');
-                        } catch {
-                          alert(`Invite code: ${s.invite_code}`);
-                        }
-                      }}
-                    >
-                      Copy code
-                    </Button>
-
-                    <p className="text-xs text-muted-foreground">Code: {s.invite_code}</p>
-                  </div>
-                  </div>
-                </button>
+          loadingMy ? (
+            <div className="glass-card p-6 text-center text-sm text-muted-foreground">Loading squads...</div>
+          ) : mySquads.length === 0 ? (
+            <div className="glass-card p-6 text-center">
+              <p className="font-semibold">No squads yet</p>
+              <p className="text-sm text-muted-foreground mt-1">Create one or discover squads in your area.</p>
+              <div className="mt-4 flex justify-center gap-2">
+                <Button variant="secondary" onClick={() => setTab('discover')}>Discover</Button>
+                <Button onClick={() => createUnlocked && setCreateOpen(true)} disabled={!createUnlocked}>Create</Button>
               </div>
-            ))}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {mySquads.map((s) => <SquadCard key={s.id} squad={s} />)}
+            </div>
+          )
+        ) : (
+          <div className="space-y-4">
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search squad name or code..."
+                className="pl-9 bg-secondary/60"
+              />
+            </div>
+
+            {loadingDiscover ? (
+              <div className="glass-card p-6 text-center text-sm text-muted-foreground">Loading squads...</div>
+            ) : (
+              <>
+                {areaSquads.length > 0 ? (
+                  <section className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <MapPin className="w-4 h-4" /> Squads in {cityLabel}
+                    </div>
+                    {areaSquads.map((s) => <SquadCard key={s.id} squad={s} showJoin />)}
+                  </section>
+                ) : null}
+
+                {otherSquads.length > 0 ? (
+                  <section className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <ShieldCheck className="w-4 h-4" /> {search.trim() ? 'Search results' : 'More squads'}
+                    </div>
+                    {otherSquads.map((s) => <SquadCard key={s.id} squad={s} showJoin />)}
+                  </section>
+                ) : null}
+
+                {discoverSquads.length === 0 ? (
+                  <div className="glass-card p-6 text-center">
+                    <p className="font-semibold">No squads found</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Try another name or code, or create a squad in your area.
+                    </p>
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
         )}
       </main>
 
-      {/* Create dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="bg-background border-border/60 rounded-2xl">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create squad</DialogTitle>
+            <DialogTitle>Create Squad</DialogTitle>
           </DialogHeader>
-
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Squad name</Label>
-              <Input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Ex: RSM Night Hoopers"
-                className="bg-secondary/60"
-              />
+              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Ex: South County Strikers" />
             </div>
-
             <div className="space-y-2">
-              <Label>Primary sport (optional)</Label>
-              <Select value={newSport} onValueChange={(v) => setNewSport(v as any)}>
-                <SelectTrigger className="bg-secondary/60">
-                  <SelectValue placeholder="Pick a sport" />
+              <Label>Sport</Label>
+              <Select value={newSport} onValueChange={(v) => setNewSport(v as Sport | 'none')}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Any sport" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Any sport</SelectItem>
-                  {Object.entries(SPORTS).map(([key, value]) => (
-                    <SelectItem key={key} value={key}>
-                      {(value as any).icon} {(value as any).label}
-                    </SelectItem>
+                  {SPORTS.map((meta) => (
+                    <SelectItem key={meta.id} value={meta.id}>{meta.icon} {meta.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-
-            {user?.isPro ? (
-              <div className="space-y-2">
-                <Label>Minimum XP to join (Pro)</Label>
-                <Input
-                  value={minXpRequired}
-                  onChange={(e) => setMinXpRequired(e.target.value.replace(/[^0-9]/g, ''))}
-                  placeholder="0"
-                  className="bg-secondary/60"
-                />
-              </div>
-            ) : null}
-
-            <Button className="w-full h-12" onClick={onCreate} disabled={!newName.trim() || !createUnlocked}>
+            <div className="space-y-2">
+              <Label>Minimum XP to join</Label>
+              <Input value={minJoinXp} onChange={(e) => setMinJoinXp(e.target.value.replace(/[^0-9]/g, ''))} placeholder="0" />
+              <p className="text-xs text-muted-foreground">Only Pro-created squads can enforce this above 0.</p>
+            </div>
+            <Button onClick={onCreate} disabled={!newName.trim() || !createUnlocked} className="w-full">
               Create squad
             </Button>
-
-            <p className="text-xs text-muted-foreground">
-              After creating, your invite code is copied to clipboard so you can share it.
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Join dialog */}
-      <Dialog open={joinOpen} onOpenChange={setJoinOpen}>
-        <DialogContent className="bg-background border-border/60 rounded-2xl">
-          <DialogHeader>
-            <DialogTitle>Join squad</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Invite code</Label>
-              <Input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="Ex: K7P2QJ"
-                className="bg-secondary/60"
-                autoCapitalize="characters"
-              />
-            </div>
-
-            <Button className="w-full h-12" onClick={onJoin} disabled={!code.trim() || !joinUnlocked}>
-              Join
-            </Button>
-
-            <p className="text-xs text-muted-foreground">Invite codes are case-insensitive.</p>
+            {!createUnlocked ? (
+              <p className="text-xs text-center text-muted-foreground">You need 1000 XP to create a squad.</p>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>

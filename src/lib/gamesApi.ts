@@ -129,32 +129,37 @@ export async function acceptGameInvite(gameId: string, inviterUserId: string): P
 export type CreateGameInput = Omit<
   Game,
   'id' | 'createdAt' | 'host' | 'players' | 'postGameVotes' | 'completedAt'
-> & {
-  recurrenceCount?: number;
-  recurrenceIntervalDays?: number;
-};
+>;
 
 export async function createGame(input: CreateGameInput): Promise<Game> {
   const playerIds = Array.from(new Set([input.hostId, ...(input.playerIds ?? [])]));
 
-  const rpcPayload = {
-    p_sport: input.sport,
-    p_title: input.title,
-    p_description: input.description || null,
-    p_date_time: input.dateTime.toISOString(),
-    p_duration: input.duration,
-    p_skill_requirement: input.skillRequirement,
-    p_max_players: input.maxPlayers,
-    p_is_private: input.isPrivate,
-    p_location_latitude: input.location.latitude,
-    p_location_longitude: input.location.longitude,
-    p_location_area_name: input.location.areaName,
-    p_recurrence_count: Math.max(1, Number(input.recurrenceCount ?? 1)),
-    p_recurrence_interval_days: Math.max(1, Number(input.recurrenceIntervalDays ?? 7)),
+  const insertRow = {
+    host_id: input.hostId,
+    sport: input.sport,
+    title: input.title,
+    description: input.description || null,
+    date_time: input.dateTime.toISOString(),
+    duration: input.duration,
+    skill_requirement: input.skillRequirement,
+    max_players: input.maxPlayers,
+    player_ids: playerIds,
+    pending_request_ids: input.pendingRequestIds,
+    is_private: input.isPrivate,
+    status: input.status ?? 'scheduled',
+    checked_in_ids: input.checkedInIds ?? [],
+    runs_started: input.runsStarted ?? false,
+    ended_at: input.endedAt ? input.endedAt.toISOString() : null,
+    post_game_votes: null,
+    post_game_voters: input.postGameVoters ?? null,
+    location_latitude: input.location.latitude,
+    location_longitude: input.location.longitude,
+    location_area_name: input.location.areaName,
   };
 
-  const { data, error } = await supabase.rpc('create_game_secure', rpcPayload).single();
+  const { data, error } = await supabase.from('games').insert(insertRow).select('*').single();
   if (error) throw error;
+
   return await hydrateGame(rowToGame(data as GameRow));
 }
 

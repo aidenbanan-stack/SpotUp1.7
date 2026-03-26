@@ -58,10 +58,6 @@ export default function CreateTournament() {
       toast.error('Please sign in first');
       return;
     }
-    if (!user?.isPro) {
-      toast.error('SpotUp Pro is required to create tournaments');
-      return;
-    }
     if (!name.trim()) {
       toast.error('Please enter a tournament name');
       return;
@@ -121,9 +117,6 @@ export default function CreateTournament() {
       </header>
 
       <main className="px-4 py-6 space-y-6">
-        {!user?.isPro ? (
-          <div className="glass-card p-4 text-sm text-muted-foreground">SpotUp Pro is required to create tournaments.</div>
-        ) : null}
         {/* Tournament Name */}
         <div className="space-y-2">
           <Label htmlFor="name">Tournament Name</Label>

@@ -27,8 +27,6 @@ export default function CreateGame() {
   const [skillLevel, setSkillLevel] = useState<SkillLevel>('intermediate');
   const [maxPlayers, setMaxPlayers] = useState(10);
   const [isPrivate, setIsPrivate] = useState(false);
-  const [isRecurring, setIsRecurring] = useState(false);
-  const [recurrenceCount, setRecurrenceCount] = useState(4);
   const [location, setLocation] = useState({
     latitude: 34.0522,
     longitude: -118.2437,
@@ -96,8 +94,6 @@ export default function CreateGame() {
         status: optimisticGame.status,
         checkedInIds: optimisticGame.checkedInIds,
         runsStarted: optimisticGame.runsStarted,
-        recurrenceCount: isRecurring ? recurrenceCount : 1,
-        recurrenceIntervalDays: 7,
       });
 
       setGames([saved, ...prevGames.filter((g) => g.id !== optimisticGame.id)]);
@@ -249,36 +245,12 @@ export default function CreateGame() {
           <LocationPicker value={location} onChange={setLocation} />
         </section>
 
-        <section className="glass-card p-4 space-y-4 animate-fade-in" style={{ animationDelay: '350ms' }}>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h3 className="font-semibold text-foreground">Private Game</h3>
-              <p className="text-sm text-muted-foreground">Players must request to join</p>
-            </div>
-            <Switch checked={isPrivate} onCheckedChange={setIsPrivate} disabled={!user?.isPro} />
+        <section className="glass-card p-4 flex items-center justify-between animate-fade-in" style={{ animationDelay: '350ms' }}>
+          <div>
+            <h3 className="font-semibold text-foreground">Private Game</h3>
+            <p className="text-sm text-muted-foreground">Players must request to join</p>
           </div>
-          {!user?.isPro ? (
-            <p className="text-xs text-muted-foreground">SpotUp Pro unlocks private games.</p>
-          ) : null}
-        </section>
-
-        <section className="glass-card p-4 space-y-4 animate-fade-in" style={{ animationDelay: '375ms' }}>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h3 className="font-semibold text-foreground">Recurring Game</h3>
-              <p className="text-sm text-muted-foreground">Repeat this game weekly</p>
-            </div>
-            <Switch checked={isRecurring} onCheckedChange={setIsRecurring} disabled={!user?.isPro} />
-          </div>
-          {isRecurring ? (
-            <div>
-              <label className="text-sm font-medium text-muted-foreground mb-2 block">Weeks to schedule</label>
-              <NumberStepper value={recurrenceCount} onChange={setRecurrenceCount} min={2} max={8} step={1} />
-            </div>
-          ) : null}
-          {!user?.isPro ? (
-            <p className="text-xs text-muted-foreground">SpotUp Pro unlocks recurring games.</p>
-          ) : null}
+          <Switch checked={isPrivate} onCheckedChange={setIsPrivate} />
         </section>
 
         <Button type="submit" variant="hero" size="xl" className="w-full">
