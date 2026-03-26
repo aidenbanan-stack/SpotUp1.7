@@ -31,7 +31,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         if (!mounted) return;
         setUser(profile);
 
-        const { error: bonusError } = await supabase.rpc('claim_daily_login_bonus');
+        const { data: bonusClaimed, error: bonusError } = await supabase.rpc('claim_daily_login_bonus');
         if (bonusError) {
           const message = (bonusError as any)?.message ?? '';
           const missingFn = message.toLowerCase().includes('function') && message.toLowerCase().includes('does not exist');
@@ -42,12 +42,16 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         } else {
           const refreshed = await getOrCreateMyProfile();
           if (!mounted) return;
-          const gained = Math.max(0, (refreshed.xp ?? 0) - (profile.xp ?? 0));
-          if (gained > 0) {
-            setUser(refreshed);
+
+          const claimed = Boolean(bonusClaimed);
+          const gained = claimed
+            ? Math.max(5, (refreshed.xp ?? 0) - (profile.xp ?? 0))
+            : Math.max(0, (refreshed.xp ?? 0) - (profile.xp ?? 0));
+
+          setUser(refreshed);
+
+          if (claimed) {
             showDailyLoginToast(gained, refreshed.xp ?? 0);
-          } else if ((refreshed.xp ?? 0) !== (profile.xp ?? 0)) {
-            setUser(refreshed);
           }
         }
       } catch (e) {
