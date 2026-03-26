@@ -17,13 +17,18 @@ import {
   Users,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
-import { SPORTS } from '@/types';
+import { SPORTS, type SquadChannel, type SquadJoinQuestion, type SquadSettings, type SquadStep1Data, type SquadTag } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/components/ui/use-toast';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import {
   deleteSquadById,
   fetchMySquads,
@@ -33,7 +38,13 @@ import {
   fetchSquadMatchHistory,
   fetchSquadMembers,
   fetchSquadRivalries,
+  fetchSquadStep1Data,
   leaveSquadById,
+  replaceSquadChannels,
+  replaceSquadJoinQuestions,
+  replaceSquadTags,
+  updateSquadProfile,
+  upsertSquadSettings,
   type SquadEventCard,
   type SquadFeedItem,
   type SquadMatchHistoryRow,
@@ -78,6 +89,47 @@ export default function SquadDetail() {
   const [rivalries, setRivalries] = useState<SquadRivalry[]>([]);
   const [events, setEvents] = useState<SquadEventCard[]>([]);
   const [feed, setFeed] = useState<SquadFeedItem[]>([]);
+  const [step1Data, setStep1Data] = useState<SquadStep1Data | null>(null);
+  const [savingStep1, setSavingStep1] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    description: '',
+    home_area: '',
+    home_court: '',
+    visibility: 'public' as 'public' | 'request' | 'invite_only',
+    vibe: 'competitive' as 'casual' | 'competitive' | 'balanced',
+    weekly_goal: '5',
+    min_xp_required: '500',
+    member_limit: '10',
+    primary_color: '#2563eb',
+    secondary_color: '#22c55e',
+    reliability_min: '90',
+    recruiting: true,
+  });
+  const [settingsForm, setSettingsForm] = useState<SquadSettings>({
+    squad_id: '',
+    motto: '',
+    banner_url: '',
+    logo_url: '',
+    recruiting_status: 'open',
+    preferred_days: [],
+    skill_focus: [],
+    age_min: null,
+    age_max: null,
+    gender_focus: 'open',
+    rules: [],
+    allow_member_invites: false,
+    allow_officer_announcements: true,
+    join_questions_enabled: true,
+    require_join_message: false,
+    updated_at: null,
+  });
+  const [tagsText, setTagsText] = useState('');
+  const [rulesText, setRulesText] = useState('');
+  const [preferredDaysText, setPreferredDaysText] = useState('');
+  const [skillFocusText, setSkillFocusText] = useState('');
+  const [questionsDraft, setQuestionsDraft] = useState<{ question_text: string; is_required: boolean }[]>([]);
+  const [channelsDraft, setChannelsDraft] = useState<{ channel_key: string; channel_name: string; is_private: boolean }[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,23 +137,46 @@ export default function SquadDetail() {
       if (!id || !user?.id) return;
       setLoading(true);
       try {
-        const [s, m, mine, matchRows, upcoming] = await Promise.all([
-          fetchSquadById(id),
+        const [m, mine, matchRows, upcoming, step1] = await Promise.all([
           fetchSquadMembers(id),
           fetchMySquads(user.id),
           fetchSquadMatchHistory(id),
           fetchSquadEvents(id),
+          fetchSquadStep1Data(id),
         ]);
         const rivalryRows = await fetchSquadRivalries(id);
-        const feedRows = await fetchSquadFeed({ squad: s, members: m, matches: matchRows });
+        const feedRows = await fetchSquadFeed({ squad: step1.squad, members: m, matches: matchRows });
         if (cancelled) return;
-        setSquad(s);
+        setSquad(step1.squad);
+        setStep1Data(step1);
         setMembers(m);
         setIsMember(mine.some((row) => row.id === id));
         setMatches(matchRows);
         setRivalries(rivalryRows);
         setEvents(upcoming);
         setFeed(feedRows);
+        setProfileForm({
+          name: step1.squad.name ?? '',
+          description: step1.squad.description ?? '',
+          home_area: step1.squad.home_area ?? '',
+          home_court: step1.squad.home_court ?? '',
+          visibility: (step1.squad.visibility ?? 'public') as 'public' | 'request' | 'invite_only',
+          vibe: (step1.squad.vibe ?? 'competitive') as 'casual' | 'competitive' | 'balanced',
+          weekly_goal: String(Number(step1.squad.weekly_goal ?? 5)),
+          min_xp_required: String(Number(step1.squad.min_xp_required ?? 500)),
+          member_limit: String(Number(step1.squad.member_limit ?? 10)),
+          primary_color: step1.squad.primary_color ?? '#2563eb',
+          secondary_color: step1.squad.secondary_color ?? '#22c55e',
+          reliability_min: String(Number(step1.squad.reliability_min ?? 90)),
+          recruiting: step1.squad.recruiting !== false,
+        });
+        setSettingsForm(step1.settings);
+        setTagsText(step1.tags.map((tag) => tag.tag).join(', '));
+        setRulesText(step1.settings.rules.join('\n'));
+        setPreferredDaysText(step1.settings.preferred_days.join(', '));
+        setSkillFocusText(step1.settings.skill_focus.join(', '));
+        setQuestionsDraft(step1.joinQuestions.map((item) => ({ question_text: item.question_text, is_required: item.is_required })));
+        setChannelsDraft(step1.channels.map((item) => ({ channel_key: item.channel_key, channel_name: item.channel_name, is_private: item.is_private })));
       } catch (e: any) {
         console.error(e);
         toast({ title: 'Could not load squad', description: e?.message ?? 'Please try again.', variant: 'destructive' });
@@ -114,6 +189,76 @@ export default function SquadDetail() {
       cancelled = true;
     };
   }, [id, user?.id, toast]);
+
+  async function reloadStep1() {
+    if (!id || !squad) return;
+    const fresh = await fetchSquadStep1Data(id);
+    setStep1Data(fresh);
+    setSquad(fresh.squad);
+  }
+
+  async function onSaveStep1() {
+    if (!id || !squad || !isOwner) return;
+    setSavingStep1(true);
+    try {
+      const updatedSquad = await updateSquadProfile({
+        squadId: id,
+        updates: {
+          name: profileForm.name,
+          description: profileForm.description,
+          home_area: profileForm.home_area,
+          home_court: profileForm.home_court,
+          visibility: profileForm.visibility,
+          vibe: profileForm.vibe,
+          weekly_goal: Number(profileForm.weekly_goal || '5'),
+          min_xp_required: Number(profileForm.min_xp_required || '0'),
+          member_limit: Number(profileForm.member_limit || '10'),
+          primary_color: profileForm.primary_color,
+          secondary_color: profileForm.secondary_color,
+          reliability_min: Number(profileForm.reliability_min || '90'),
+          recruiting: profileForm.recruiting,
+        },
+      });
+
+      const updatedSettings = await upsertSquadSettings({
+        squadId: id,
+        settings: {
+          ...settingsForm,
+          motto: settingsForm.motto,
+          banner_url: settingsForm.banner_url,
+          logo_url: settingsForm.logo_url,
+          preferred_days: preferredDaysText.split(',').map((item) => item.trim()).filter(Boolean),
+          skill_focus: skillFocusText.split(',').map((item) => item.trim()).filter(Boolean),
+          rules: rulesText.split('\n').map((item) => item.trim()).filter(Boolean),
+        },
+      });
+
+      await replaceSquadTags({
+        squadId: id,
+        tags: tagsText.split(',').map((item) => item.trim()).filter(Boolean),
+      });
+
+      await replaceSquadJoinQuestions({
+        squadId: id,
+        questions: questionsDraft,
+      });
+
+      await replaceSquadChannels({
+        squadId: id,
+        channels: channelsDraft,
+      });
+
+      setSquad(updatedSquad);
+      setSettingsForm(updatedSettings);
+      await reloadStep1();
+      toast({ title: 'Step 1 saved', description: 'Squad data model settings are now updated.' });
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Could not save step 1', description: e?.message ?? 'Please try again.', variant: 'destructive' });
+    } finally {
+      setSavingStep1(false);
+    }
+  }
 
   const sportMeta = useMemo(() => {
     const key = (squad?.sport ?? null) as any;
@@ -539,28 +684,116 @@ export default function SquadDetail() {
         </TabsContent>
 
         <TabsContent value="manage" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-4">
             <Card>
-              <CardHeader><CardTitle>What this build now supports</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <div>Rich squad HQ overview</div>
-                <div>Member hierarchy and recruiting summary</div>
-                <div>Activity feed, rivalries, and match history</div>
-                <div>Season goals and progression dashboard</div>
-                <div>Hooks for events, announcements, and future chat channels</div>
+              <CardHeader><CardTitle>Pending queue</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Join requests</span><span className="font-semibold">{step1Data?.pending.joinRequests ?? 0}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Invites</span><span className="font-semibold">{step1Data?.pending.invites ?? 0}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Bans</span><span className="font-semibold">{step1Data?.pending.bans ?? 0}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Audit rows</span><span className="font-semibold">{step1Data?.pending.audits ?? 0}</span></div>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader><CardTitle>Next backend wiring</CardTitle></CardHeader>
+            <Card className="md:col-span-3">
+              <CardHeader><CardTitle>Step 1 data model expansion</CardTitle></CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <div>Join requests and invites tables</div>
-                <div>Persistent squad settings and editable branding</div>
-                <div>Squad-only chat and announcements storage</div>
-                <div>Tournament roster locks and squad event RSVP tables</div>
-                <div>Moderation logs, bans, and dispute review</div>
+                <div>This build now stores richer squad profile data, settings, rules, tags, join questions, channels, and moderation-ready counts.</div>
+                <div>Step 2 will plug these structures into real join request workflows, invite flows, and editable role management UI.</div>
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader><CardTitle>Squad profile</CardTitle></CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2 md:col-span-2"><Label>Name</Label><Input value={profileForm.name} disabled={!isOwner} onChange={(e) => setProfileForm((prev) => ({ ...prev, name: e.target.value }))} /></div>
+              <div className="space-y-2 md:col-span-2"><Label>Description</Label><Textarea value={profileForm.description} disabled={!isOwner} rows={3} onChange={(e) => setProfileForm((prev) => ({ ...prev, description: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Home area</Label><Input value={profileForm.home_area} disabled={!isOwner} onChange={(e) => setProfileForm((prev) => ({ ...prev, home_area: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Home court</Label><Input value={profileForm.home_court} disabled={!isOwner} onChange={(e) => setProfileForm((prev) => ({ ...prev, home_court: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Visibility</Label><Select value={profileForm.visibility} disabled={!isOwner} onValueChange={(value) => setProfileForm((prev) => ({ ...prev, visibility: value as 'public' | 'request' | 'invite_only' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="public">Public</SelectItem><SelectItem value="request">Request</SelectItem><SelectItem value="invite_only">Invite only</SelectItem></SelectContent></Select></div>
+              <div className="space-y-2"><Label>Vibe</Label><Select value={profileForm.vibe} disabled={!isOwner} onValueChange={(value) => setProfileForm((prev) => ({ ...prev, vibe: value as 'casual' | 'competitive' | 'balanced' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="casual">Casual</SelectItem><SelectItem value="balanced">Balanced</SelectItem><SelectItem value="competitive">Competitive</SelectItem></SelectContent></Select></div>
+              <div className="space-y-2"><Label>Weekly goal</Label><Input type="number" disabled={!isOwner} value={profileForm.weekly_goal} onChange={(e) => setProfileForm((prev) => ({ ...prev, weekly_goal: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Minimum XP</Label><Input type="number" disabled={!isOwner} value={profileForm.min_xp_required} onChange={(e) => setProfileForm((prev) => ({ ...prev, min_xp_required: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Member limit</Label><Input type="number" disabled={!isOwner} value={profileForm.member_limit} onChange={(e) => setProfileForm((prev) => ({ ...prev, member_limit: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Reliability minimum</Label><Input type="number" disabled={!isOwner} value={profileForm.reliability_min} onChange={(e) => setProfileForm((prev) => ({ ...prev, reliability_min: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Primary color</Label><Input type="color" disabled={!isOwner} value={profileForm.primary_color} onChange={(e) => setProfileForm((prev) => ({ ...prev, primary_color: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Secondary color</Label><Input type="color" disabled={!isOwner} value={profileForm.secondary_color} onChange={(e) => setProfileForm((prev) => ({ ...prev, secondary_color: e.target.value }))} /></div>
+              <div className="rounded-xl border p-3 md:col-span-2 flex items-center justify-between">
+                <div><div className="font-medium">Recruiting open</div><div className="text-sm text-muted-foreground">Allow discovery and incoming members.</div></div>
+                <Switch disabled={!isOwner} checked={profileForm.recruiting} onCheckedChange={(checked) => setProfileForm((prev) => ({ ...prev, recruiting: checked }))} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Settings and culture</CardTitle></CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2 md:col-span-2"><Label>Motto</Label><Input value={settingsForm.motto} disabled={!isOwner} onChange={(e) => setSettingsForm((prev) => ({ ...prev, motto: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Recruiting status</Label><Select value={settingsForm.recruiting_status} disabled={!isOwner} onValueChange={(value) => setSettingsForm((prev) => ({ ...prev, recruiting_status: value as SquadSettings['recruiting_status'] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="open">Open</SelectItem><SelectItem value="selective">Selective</SelectItem><SelectItem value="closed">Closed</SelectItem></SelectContent></Select></div>
+              <div className="space-y-2"><Label>Gender focus</Label><Select value={settingsForm.gender_focus} disabled={!isOwner} onValueChange={(value) => setSettingsForm((prev) => ({ ...prev, gender_focus: value as SquadSettings['gender_focus'] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="open">Open</SelectItem><SelectItem value="mens">Mens</SelectItem><SelectItem value="womens">Womens</SelectItem><SelectItem value="coed">Co-ed</SelectItem></SelectContent></Select></div>
+              <div className="space-y-2"><Label>Preferred days</Label><Input value={preferredDaysText} disabled={!isOwner} onChange={(e) => setPreferredDaysText(e.target.value)} placeholder="Mon, Wed, Sat" /></div>
+              <div className="space-y-2"><Label>Skill focus</Label><Input value={skillFocusText} disabled={!isOwner} onChange={(e) => setSkillFocusText(e.target.value)} placeholder="Defense, spacing, pace" /></div>
+              <div className="space-y-2"><Label>Tags</Label><Input value={tagsText} disabled={!isOwner} onChange={(e) => setTagsText(e.target.value)} placeholder="local, reliable, weekend" /></div>
+              <div className="space-y-2 md:col-span-2"><Label>Rules</Label><Textarea value={rulesText} disabled={!isOwner} rows={5} onChange={(e) => setRulesText(e.target.value)} placeholder="One rule per line" /></div>
+              <div className="rounded-xl border p-3 flex items-center justify-between">
+                <div><div className="font-medium">Allow member invites</div><div className="text-sm text-muted-foreground">Members can invite people without officer approval.</div></div>
+                <Switch disabled={!isOwner} checked={settingsForm.allow_member_invites} onCheckedChange={(checked) => setSettingsForm((prev) => ({ ...prev, allow_member_invites: checked }))} />
+              </div>
+              <div className="rounded-xl border p-3 flex items-center justify-between">
+                <div><div className="font-medium">Officer announcements</div><div className="text-sm text-muted-foreground">Officers can push official squad updates.</div></div>
+                <Switch disabled={!isOwner} checked={settingsForm.allow_officer_announcements} onCheckedChange={(checked) => setSettingsForm((prev) => ({ ...prev, allow_officer_announcements: checked }))} />
+              </div>
+              <div className="rounded-xl border p-3 flex items-center justify-between">
+                <div><div className="font-medium">Enable join questions</div><div className="text-sm text-muted-foreground">Show question prompts in the application flow.</div></div>
+                <Switch disabled={!isOwner} checked={settingsForm.join_questions_enabled} onCheckedChange={(checked) => setSettingsForm((prev) => ({ ...prev, join_questions_enabled: checked }))} />
+              </div>
+              <div className="rounded-xl border p-3 flex items-center justify-between">
+                <div><div className="font-medium">Require join message</div><div className="text-sm text-muted-foreground">Applicants must include a note.</div></div>
+                <Switch disabled={!isOwner} checked={settingsForm.require_join_message} onCheckedChange={(checked) => setSettingsForm((prev) => ({ ...prev, require_join_message: checked }))} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Join questions</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              {questionsDraft.length > 0 ? questionsDraft.map((question, index) => (
+                <div key={index} className="grid gap-2 md:grid-cols-[1fr_auto_auto]">
+                  <Input value={question.question_text} disabled={!isOwner} onChange={(e) => setQuestionsDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, question_text: e.target.value } : item))} />
+                  <Button type="button" variant={question.is_required ? 'default' : 'secondary'} disabled={!isOwner} onClick={() => setQuestionsDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, is_required: !item.is_required } : item))}>
+                    {question.is_required ? 'Required' : 'Optional'}
+                  </Button>
+                  <Button type="button" variant="ghost" disabled={!isOwner} onClick={() => setQuestionsDraft((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}>Remove</Button>
+                </div>
+              )) : <div className="text-sm text-muted-foreground">No join questions yet.</div>}
+              <Button type="button" variant="secondary" disabled={!isOwner} onClick={() => setQuestionsDraft((prev) => [...prev, { question_text: '', is_required: true }])}>Add question</Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Channels</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              {channelsDraft.map((channel, index) => (
+                <div key={index} className="grid gap-2 md:grid-cols-[1fr_1fr_auto_auto]">
+                  <Input value={channel.channel_name} disabled={!isOwner} placeholder="Channel name" onChange={(e) => setChannelsDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, channel_name: e.target.value } : item))} />
+                  <Input value={channel.channel_key} disabled={!isOwner} placeholder="channel_key" onChange={(e) => setChannelsDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, channel_key: e.target.value } : item))} />
+                  <Button type="button" variant={channel.is_private ? 'default' : 'secondary'} disabled={!isOwner} onClick={() => setChannelsDraft((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, is_private: !item.is_private } : item))}>
+                    {channel.is_private ? 'Private' : 'Public'}
+                  </Button>
+                  <Button type="button" variant="ghost" disabled={!isOwner} onClick={() => setChannelsDraft((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}>Remove</Button>
+                </div>
+              ))}
+              <Button type="button" variant="secondary" disabled={!isOwner} onClick={() => setChannelsDraft((prev) => [...prev, { channel_key: 'new_channel', channel_name: 'New Channel', is_private: false }])}>Add channel</Button>
+            </CardContent>
+          </Card>
+
+          {isOwner ? (
+            <Button onClick={onSaveStep1} disabled={savingStep1}>
+              {savingStep1 ? 'Saving step 1...' : 'Save step 1 data model'}
+            </Button>
+          ) : (
+            <Card><CardContent className="p-4 text-sm text-muted-foreground">Only the squad owner can edit step 1 settings right now.</CardContent></Card>
+          )}
         </TabsContent>
       </Tabs>
     </div>

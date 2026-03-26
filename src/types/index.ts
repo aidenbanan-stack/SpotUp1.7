@@ -260,6 +260,88 @@ export interface Tournament {
   createdAt: Date;
 }
 
+export interface SquadSettings {
+  squad_id: string;
+  motto: string;
+  banner_url: string;
+  logo_url: string;
+  recruiting_status: 'open' | 'selective' | 'closed';
+  preferred_days: string[];
+  skill_focus: string[];
+  age_min: number | null;
+  age_max: number | null;
+  gender_focus: 'open' | 'mens' | 'womens' | 'coed';
+  rules: string[];
+  allow_member_invites: boolean;
+  allow_officer_announcements: boolean;
+  join_questions_enabled: boolean;
+  require_join_message: boolean;
+  updated_at?: string | null;
+}
+
+export interface SquadTag {
+  id: string;
+  squad_id: string;
+  tag: string;
+  sort_order: number;
+}
+
+export interface SquadJoinQuestion {
+  id: string;
+  squad_id: string;
+  question_text: string;
+  is_required: boolean;
+  sort_order: number;
+}
+
+export interface SquadChannel {
+  id: string;
+  squad_id: string;
+  channel_key: string;
+  channel_name: string;
+  is_private: boolean;
+  sort_order: number;
+}
+
+export interface SquadPendingSummary {
+  joinRequests: number;
+  invites: number;
+  bans: number;
+  audits: number;
+}
+
+export interface SquadStep1Data {
+  squad: {
+    id: string;
+    name: string;
+    sport: Sport | null;
+    owner_id: string | null;
+    invite_code: string;
+    created_at: string;
+    min_xp_required?: number;
+    member_limit?: number;
+    wins?: number;
+    losses?: number;
+    points?: number;
+    rating?: number;
+    home_area?: string | null;
+    description?: string | null;
+    visibility?: 'public' | 'request' | 'invite_only' | null;
+    vibe?: 'casual' | 'competitive' | 'balanced' | null;
+    weekly_goal?: number | null;
+    primary_color?: string | null;
+    secondary_color?: string | null;
+    home_court?: string | null;
+    recruiting?: boolean | null;
+    reliability_min?: number | null;
+  };
+  settings: SquadSettings;
+  tags: SquadTag[];
+  joinQuestions: SquadJoinQuestion[];
+  channels: SquadChannel[];
+  pending: SquadPendingSummary;
+}
+
 export const SPORTS: { id: Sport; name: string; icon: string }[] = [
   { id: 'basketball', name: 'Basketball', icon: '🏀' },
   { id: 'soccer', name: 'Soccer', icon: '⚽' },
