@@ -8,6 +8,8 @@ export type SquadRow = {
   owner_id: string | null;
   invite_code: string;
   created_at: string;
+  min_xp_required?: number;
+  member_limit?: number;
 };
 
 export type SquadWithMeta = SquadRow & {
@@ -44,7 +46,7 @@ export async function fetchMySquads(userId: string): Promise<SquadWithMeta[]> {
 
   const { data: squads, error: sErr } = await supabase
     .from('squads')
-    .select('*')
+    .select('id,name,sport,owner_id,invite_code,created_at,min_xp_required,member_limit')
     .in('id', squadIds)
     .order('created_at', { ascending: false });
 
@@ -77,70 +79,28 @@ export async function fetchMySquads(userId: string): Promise<SquadWithMeta[]> {
   }));
 }
 
-export async function createSquad(args: { userId: string; name: string; sport: Sport | null }): Promise<SquadRow> {
-  // Generate invite code and retry on collision a few times
-  let lastErr: any = null;
+export async function createSquad(args: { userId: string; name: string; sport: Sport | null; minXpRequired?: number }): Promise<SquadRow> {
+  const { data, error } = await supabase
+    .rpc('create_squad_secure', {
+      p_name: args.name.trim(),
+      p_sport: args.sport,
+      p_min_xp_required: Math.max(0, Number(args.minXpRequired ?? 0)),
+    })
+    .single();
 
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const invite_code = makeInviteCode(6);
-
-    const { data: created, error: cErr } = await supabase
-      .from('squads')
-      .insert({
-        name: args.name.trim(),
-        sport: args.sport,
-        owner_id: args.userId,
-        invite_code,
-      })
-      .select('*')
-      .single();
-
-    if (!cErr && created) {
-      // Add owner as member
-      const { error: mErr } = await supabase.from('squad_members').insert({
-        squad_id: created.id,
-        user_id: args.userId,
-        role: 'owner',
-      });
-      if (mErr) throw mErr;
-      return created as SquadRow;
-    }
-
-    lastErr = cErr;
-  }
-
-  throw lastErr ?? new Error('Failed to create squad');
+  if (error) throw error;
+  return data as SquadRow;
 }
 
 export async function joinSquadByCode(args: { userId: string; code: string }): Promise<SquadRow> {
   const code = args.code.trim().toUpperCase();
-  const { data: squad, error: sErr } = await supabase
-    .from('squads')
-    .select('*')
-    .eq('invite_code', code)
-    .single();
-
-  if (sErr) throw sErr;
-
-  const { error: mErr } = await supabase.from('squad_members').insert({
-    squad_id: (squad as any).id,
-    user_id: args.userId,
-    role: 'member',
-  });
-
-  if (mErr) {
-    const msg = (mErr as any)?.message ?? '';
-    const codePg = (mErr as any)?.code ?? '';
-    const isDup =
-      String(codePg) === '23505' || msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('unique');
-    if (!isDup) throw mErr;
-  }
-
-  return squad as SquadRow;
+  const { data, error } = await supabase.rpc('join_squad_by_code_secure', { p_code: code }).single();
+  if (error) throw error;
+  return data as SquadRow;
 }
 
 export async function fetchSquadById(squadId: string): Promise<SquadRow> {
-  const { data, error } = await supabase.from('squads').select('*').eq('id', squadId).single();
+  const { data, error } = await supabase.from('squads').select('id,name,sport,owner_id,invite_code,created_at,min_xp_required,member_limit').eq('id', squadId).single();
   if (error) throw error;
   return data as SquadRow;
 }

@@ -27,10 +27,12 @@ export default function Squads() {
 
   const [newName, setNewName] = useState('');
   const [newSport, setNewSport] = useState<Sport | 'none'>('none');
+  const [minXpRequired, setMinXpRequired] = useState('0');
 
   const [code, setCode] = useState('');
 
-  const squadsUnlocked = (user?.xp ?? 0) >= 300;
+  const joinUnlocked = (user?.xp ?? 0) >= 500;
+  const createUnlocked = (user?.xp ?? 0) >= 1000;
 
   async function refresh() {
     if (!user?.id) return;
@@ -77,11 +79,13 @@ export default function Squads() {
         userId: user.id,
         name,
         sport: newSport === 'none' ? null : (newSport as Sport),
+        minXpRequired: user.isPro ? Number(minXpRequired || '0') : 0,
       });
 
       setCreateOpen(false);
       setNewName('');
       setNewSport('none');
+      setMinXpRequired('0');
 
       // Re-fetch to include member counts
       await refresh();
@@ -124,7 +128,7 @@ export default function Squads() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => squadsUnlocked && setJoinOpen(true)}
+              onClick={() => joinUnlocked && setJoinOpen(true)}
               className="p-2 rounded-xl bg-secondary/60"
               aria-label="Join squad"
               title="Join"
@@ -132,7 +136,7 @@ export default function Squads() {
               <LinkIcon className="w-5 h-5" />
             </button>
             <button
-              onClick={() => squadsUnlocked && setCreateOpen(true)}
+              onClick={() => createUnlocked && setCreateOpen(true)}
               className="p-2 rounded-xl bg-secondary/60"
               aria-label="Create squad"
               title="Create"
@@ -144,14 +148,11 @@ export default function Squads() {
       </header>
 
       <main className="px-4 py-5 max-w-2xl mx-auto space-y-4">
-        {!squadsUnlocked ? (
-          <div className="glass-card p-5 text-center">
-            <p className="font-semibold">Squads unlock at 300 XP</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              You currently have {(user?.xp ?? 0).toLocaleString()} XP. Keep playing to unlock full squad features.
-            </p>
-          </div>
-        ) : null}
+        <div className="glass-card p-5 text-center">
+          <p className="font-semibold">Squad requirements</p>
+          <p className="text-sm text-muted-foreground mt-1">Join at 500 XP. Create at 1000 XP. Free players can join 1 squad and own 1 squad at a time. Pro players can join and create multiple squads.</p>
+          <p className="text-xs text-muted-foreground mt-2">You currently have {(user?.xp ?? 0).toLocaleString()} XP {user?.isPro ? '• SpotUp Pro active' : '• Free plan'}.</p>
+        </div>
 
         {/* Tabs (Clash Royale-ish) */}
         <div className="flex gap-2">
@@ -201,14 +202,14 @@ export default function Squads() {
                 className="bg-secondary/60"
                 autoCapitalize="characters"
               />
-              <Button onClick={onJoin} disabled={!code.trim() || !squadsUnlocked} className="h-11">
+              <Button onClick={onJoin} disabled={!code.trim() || !joinUnlocked} className="h-11">
                 Join
               </Button>
             </div>
 
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">Invite codes are case-insensitive.</p>
-              <Button variant="secondary" onClick={() => squadsUnlocked && setCreateOpen(true)} disabled={!squadsUnlocked}>
+              <Button variant="secondary" onClick={() => createUnlocked && setCreateOpen(true)} disabled={!createUnlocked}>
                 Create squad
               </Button>
             </div>
@@ -225,10 +226,10 @@ export default function Squads() {
             </p>
 
             <div className="mt-4 flex gap-2 justify-center">
-              <Button variant="secondary" onClick={() => squadsUnlocked && setJoinOpen(true)} disabled={!squadsUnlocked}>
+              <Button variant="secondary" onClick={() => joinUnlocked && setJoinOpen(true)} disabled={!joinUnlocked}>
                 Join
               </Button>
-              <Button onClick={() => squadsUnlocked && setCreateOpen(true)} disabled={!squadsUnlocked}>Create</Button>
+              <Button onClick={() => createUnlocked && setCreateOpen(true)} disabled={!createUnlocked}>Create</Button>
             </div>
           </div>
         ) : (
@@ -321,7 +322,19 @@ export default function Squads() {
               </Select>
             </div>
 
-            <Button className="w-full h-12" onClick={onCreate} disabled={!newName.trim() || !squadsUnlocked}>
+            {user?.isPro ? (
+              <div className="space-y-2">
+                <Label>Minimum XP to join (Pro)</Label>
+                <Input
+                  value={minXpRequired}
+                  onChange={(e) => setMinXpRequired(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="0"
+                  className="bg-secondary/60"
+                />
+              </div>
+            ) : null}
+
+            <Button className="w-full h-12" onClick={onCreate} disabled={!newName.trim() || !createUnlocked}>
               Create squad
             </Button>
 
@@ -351,7 +364,7 @@ export default function Squads() {
               />
             </div>
 
-            <Button className="w-full h-12" onClick={onJoin} disabled={!code.trim() || !squadsUnlocked}>
+            <Button className="w-full h-12" onClick={onJoin} disabled={!code.trim() || !joinUnlocked}>
               Join
             </Button>
 

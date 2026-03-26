@@ -128,6 +128,8 @@ export interface User {
   };
   // Court exploration
   uniqueCourtsPlayed?: number;
+  isPro?: boolean;
+  isAdmin?: boolean;
 }
 
 export interface Game {
