@@ -37,14 +37,17 @@ type RoadMarker = {
 type MarkerCluster = {
   id: string;
   y: number;
-  side: 'left' | 'right';
   users: RoadMarker[];
 };
 
-const ROAD_HEIGHT = 1800;
-const ROAD_TOP_PADDING = 88;
-const ROAD_BOTTOM_PADDING = 64;
+const ROAD_HEIGHT = 2600;
+const ROAD_TOP_PADDING = 96;
+const ROAD_BOTTOM_PADDING = 72;
 const ROAD_MAX_XP = 11000;
+const TIER_CARD_HEIGHT = 94;
+const TIER_CARD_SAFE_ZONE = 66;
+const MARKER_CLUSTER_GAP = 34;
+const TICK_INTERVAL = 200;
 
 function xpForSport(user: User, sport: SportFilter): number {
   if (sport === 'all') return user.xp;
@@ -113,12 +116,46 @@ function xpToY(xp: number) {
   return ROAD_TOP_PADDING + (1 - normalized) * ROAD_HEIGHT;
 }
 
-function tierToY(index: number, total: number) {
-  if (total <= 1) return ROAD_TOP_PADDING + ROAD_HEIGHT / 2;
-  const topAnchor = ROAD_TOP_PADDING + 84;
-  const bottomAnchor = ROAD_TOP_PADDING + ROAD_HEIGHT - 84;
-  const step = (bottomAnchor - topAnchor) / (total - 1);
-  return bottomAnchor - index * step;
+function getTierCenterXP(tier: RoadTier) {
+  if (tier.maxXP == null) return tier.minXP + (ROAD_MAX_XP - tier.minXP) * 0.5;
+  return tier.minXP + (tier.maxXP - tier.minXP) * 0.5;
+}
+
+function buildTierAnchors(roadTiers: RoadTier[]) {
+  const roadBottom = xpToY(0);
+  const roadTop = xpToY(ROAD_MAX_XP);
+  const minCenter = roadTop + TIER_CARD_HEIGHT / 2 + 8;
+  const maxCenter = roadBottom - TIER_CARD_HEIGHT / 2 - 8;
+
+  const provisional = roadTiers.map((tier) => {
+    const rawY = xpToY(getTierCenterXP(tier));
+    return {
+      tierId: tier.id,
+      y: Math.max(minCenter, Math.min(maxCenter, rawY)),
+    };
+  });
+
+  for (let i = provisional.length - 2; i >= 0; i -= 1) {
+    const below = provisional[i + 1];
+    const current = provisional[i];
+    current.y = Math.min(current.y, below.y - TIER_CARD_HEIGHT - 14);
+  }
+
+  for (let i = 1; i < provisional.length; i += 1) {
+    const above = provisional[i - 1];
+    const current = provisional[i];
+    current.y = Math.max(current.y, above.y + TIER_CARD_HEIGHT + 14);
+  }
+
+  provisional[0].y = maxCenter;
+  for (let i = 1; i < provisional.length; i += 1) {
+    provisional[i].y = Math.min(provisional[i].y, provisional[i - 1].y - (TIER_CARD_HEIGHT + 14));
+  }
+
+  return provisional.reduce<Record<string, number>>((acc, item) => {
+    acc[item.tierId] = item.y;
+    return acc;
+  }, {});
 }
 
 function getTierUnlocks(tier: RoadTier) {
@@ -156,7 +193,7 @@ function clusterMarkers(markers: RoadMarker[]): MarkerCluster[] {
     }
 
     const avgY = current.reduce((sum, item) => sum + item.y, 0) / current.length;
-    if (Math.abs(marker.y - avgY) <= 34) {
+    if (Math.abs(marker.y - avgY) <= MARKER_CLUSTER_GAP) {
       current.push(marker);
     } else {
       groups.push([marker]);
@@ -166,7 +203,6 @@ function clusterMarkers(markers: RoadMarker[]): MarkerCluster[] {
   return groups.map((group, index) => ({
     id: `cluster-${index}`,
     y: group.reduce((sum, item) => sum + item.y, 0) / group.length,
-    side: index % 2 === 0 ? 'left' : 'right',
     users: group.sort((a, b) => Number(b.isMe) - Number(a.isMe) || b.xp - a.xp),
   }));
 }
@@ -264,13 +300,6 @@ export function XPRoadDialog({
     return SPORTS.find((sport) => sport.id === sportFilter)?.name ?? 'Sport';
   }, [sportFilter]);
 
-  const allDropMilestones = useMemo(() => {
-    return roadTiers
-      .flatMap((tier) => tier.drops)
-      .filter((xp, index, arr) => arr.indexOf(xp) === index)
-      .sort((a, b) => a - b);
-  }, [roadTiers]);
-
   const markerClusters = useMemo(() => {
     if (!me) return [];
     const markers: RoadMarker[] = [
@@ -285,6 +314,46 @@ export function XPRoadDialog({
 
     return clusterMarkers(markers);
   }, [friendsRanked, me, myXP]);
+
+  const tierAnchors = useMemo(() => buildTierAnchors(roadTiers), [roadTiers]);
+
+  const tierUsers = useMemo(() => {
+    return roadTiers.reduce<Record<string, RoadMarker[]>>((acc, tier) => {
+      acc[tier.id] = [];
+      return acc;
+    }, {});
+  }, [roadTiers]);
+
+  const tierUsersPopulated = useMemo(() => {
+    const base = { ...tierUsers };
+    markerClusters.flatMap((cluster) => cluster.users).forEach((marker) => {
+      const tier = levelForXP(marker.xp);
+      base[tier.id] = [...(base[tier.id] ?? []), marker];
+    });
+
+    Object.keys(base).forEach((key) => {
+      base[key] = base[key]
+        .sort((a, b) => Number(b.isMe) - Number(a.isMe) || b.xp - a.xp)
+        .filter((marker, index, arr) => arr.findIndex((item) => item.user.id === marker.user.id) === index);
+    });
+
+    return base;
+  }, [markerClusters, tierUsers]);
+
+  const visibleTicks = useMemo(() => {
+    const ticks: number[] = [];
+    for (let xp = TICK_INTERVAL; xp <= ROAD_MAX_XP; xp += TICK_INTERVAL) {
+      ticks.push(xp);
+    }
+
+    return ticks.filter((xp) => {
+      const y = xpToY(xp);
+      return !roadTiers.some((tier) => {
+        const anchorY = tierAnchors[tier.id];
+        return Math.abs(y - anchorY) < TIER_CARD_SAFE_ZONE;
+      });
+    });
+  }, [roadTiers, tierAnchors]);
 
   const openProfile = (userId: string) => {
     setSelectedUserId(userId);
@@ -391,7 +460,7 @@ export function XPRoadDialog({
               <div className="mb-4 flex items-center justify-between gap-3 px-1">
                 <div>
                   <h3 className="text-lg font-bold">Road</h3>
-                  <p className="text-sm text-muted-foreground">Tier cards stay centered. Profile markers group together when they are close.</p>
+                  <p className="text-sm text-muted-foreground">Ticks and profiles now follow exact XP positions on the center road.</p>
                 </div>
                 <Badge variant="secondary" className="rounded-full px-3 py-1">
                   {sportLabel}
@@ -403,35 +472,36 @@ export function XPRoadDialog({
                   className="relative mx-auto"
                   style={{ height: ROAD_HEIGHT + ROAD_TOP_PADDING + ROAD_BOTTOM_PADDING }}
                 >
-                  <div className="absolute bottom-0 left-1/2 top-0 w-[6px] -translate-x-1/2 rounded-full bg-gradient-to-t from-primary via-primary/80 to-primary/30 shadow-[0_0_24px_rgba(239,68,68,0.35)]" />
+                  <div className="absolute bottom-[36px] left-1/2 top-[36px] w-[6px] -translate-x-1/2 rounded-full bg-gradient-to-t from-primary via-primary/80 to-primary/30 shadow-[0_0_24px_rgba(239,68,68,0.35)]" />
 
-                  {allDropMilestones.map((dropXp, index) => {
-                    const y = xpToY(dropXp);
+                  {visibleTicks.map((tickXp, index) => {
+                    const y = xpToY(tickXp);
                     return (
-                      <div key={`drop-${dropXp}`} className="absolute left-1/2 z-[1]" style={{ top: y, transform: 'translate(-50%, -50%)' }}>
+                      <div key={`tick-${tickXp}`} className="absolute left-1/2 z-[1]" style={{ top: y, transform: 'translate(-50%, -50%)' }}>
                         <div className="relative h-5 w-0">
                           <div className="absolute left-1/2 top-1/2 h-[3px] w-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/85 shadow-sm" />
                           <div
                             className={cn(
                               'absolute top-1/2 -translate-y-1/2 whitespace-nowrap text-xs font-semibold leading-none text-muted-foreground',
-                              index % 2 === 0 ? 'left-[26px]' : 'right-[26px] text-right',
+                              index % 2 === 0 ? 'left-[28px]' : 'right-[28px] text-right',
                             )}
                           >
-                            {dropXp.toLocaleString()} XP
+                            {tickXp.toLocaleString()} XP
                           </div>
                         </div>
                       </div>
                     );
                   })}
 
-                  {roadTiers.map((tier, index) => {
-                    const y = tierToY(index, roadTiers.length);
+                  {roadTiers.map((tier) => {
+                    const y = tierAnchors[tier.id] ?? xpToY(getTierCenterXP(tier));
                     const tierActive = myXP >= tier.minXP && (tier.maxXP == null || myXP < tier.maxXP);
                     const tierUnlocked = myXP >= tier.minXP;
+                    const usersInTier = tierUsersPopulated[tier.id] ?? [];
                     return (
                       <div
                         key={tier.id}
-                        className="absolute left-1/2 z-[3] w-[min(84vw,340px)]"
+                        className="absolute left-1/2 z-[3] w-[min(84vw,360px)]"
                         style={{ top: y, transform: 'translate(-50%, -50%)' }}
                       >
                         <div
@@ -455,6 +525,30 @@ export function XPRoadDialog({
                               </div>
                               <p className="text-xs text-muted-foreground">{formatTierRange(tier)}</p>
                             </div>
+                            {usersInTier.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedCluster({ id: `tier-${tier.id}`, y, users: usersInTier })}
+                                className="mr-1 flex shrink-0 items-center rounded-full border border-border/60 bg-background/90 px-1.5 py-1 transition hover:bg-secondary/80"
+                                aria-label={`View all profiles in ${tier.name}`}
+                              >
+                                <div className="flex items-center">
+                                  {usersInTier.slice(0, 4).map((marker, index) => (
+                                    <div key={marker.user.id} className={cn('relative', index > 0 && '-ml-2.5')}>
+                                      <Avatar className={cn('h-7 w-7 border-2 shadow-sm', marker.isMe ? 'border-red-500' : 'border-background')}>
+                                        <AvatarImage src={marker.user.profilePhotoUrl} alt={marker.user.username} />
+                                        <AvatarFallback>{getInitials(marker.user.username)}</AvatarFallback>
+                                      </Avatar>
+                                    </div>
+                                  ))}
+                                </div>
+                                {usersInTier.length > 4 && (
+                                  <div className="ml-1 flex h-6 min-w-6 items-center justify-center rounded-full bg-secondary px-1.5 text-[10px] font-semibold">
+                                    +{usersInTier.length - 4}
+                                  </div>
+                                )}
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => setSelectedTier(tier)}
@@ -471,7 +565,6 @@ export function XPRoadDialog({
 
                   {markerClusters.map((cluster) => {
                     const isGrouped = cluster.users.length > 1;
-                    const translateX = cluster.side === 'left' ? 'calc(-50% - 34px)' : 'calc(-50% + 34px)';
                     return (
                       <button
                         key={cluster.id}
@@ -484,7 +577,7 @@ export function XPRoadDialog({
                           setSelectedCluster(cluster);
                         }}
                         className="absolute left-1/2 z-[4]"
-                        style={{ top: cluster.y, transform: `translate(${translateX}, -50%)` }}
+                        style={{ top: cluster.y, transform: 'translate(-50%, -50%)' }}
                         aria-label={isGrouped ? 'Open grouped profiles' : `Open ${cluster.users[0].user.username} profile`}
                       >
                         <div className="flex items-center rounded-full border border-border/60 bg-background/96 px-2 py-1.5 shadow-lg backdrop-blur-md">
@@ -507,13 +600,6 @@ export function XPRoadDialog({
                       </button>
                     );
                   })}
-
-                  <div
-                    className="absolute left-1/2 z-[2]"
-                    style={{ top: xpToY(0), transform: 'translate(-50%, -50%)' }}
-                  >
-                    <div className="rounded-full border border-border/50 bg-background/95 px-3 py-1 text-sm font-semibold shadow-md">0 XP</div>
-                  </div>
                 </div>
               </div>
             </section>
@@ -532,9 +618,9 @@ export function XPRoadDialog({
       <Dialog open={Boolean(selectedCluster)} onOpenChange={(value) => !value && setSelectedCluster(null)}>
         <DialogContent className="max-w-md rounded-[28px] border-border/60 bg-background/95 p-0 backdrop-blur">
           <DialogHeader className="border-b border-border/50 px-5 pb-3 pt-5 text-left">
-            <DialogTitle>Profiles on this spot</DialogTitle>
+            <DialogTitle>Profiles here</DialogTitle>
             <DialogDescription>
-              Players clustered together because their XP is close.
+              Open any profile from this road spot or tier group.
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[60dvh] space-y-2 overflow-y-auto p-4">
