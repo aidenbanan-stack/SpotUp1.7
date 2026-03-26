@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 import { fetchMyFriends } from '@/lib/socialApi';
 import PlayerProfileDialog from '@/components/PlayerProfileDialog';
 import { PLAYER_LEVELS, SPORTS, Sport, User } from '@/types';
-import { ChevronUp, Crown, Info, Lock, Sparkles, Swords, Users, X } from 'lucide-react';
+import { ChevronUp, Crown, Info, Lock, Sparkles, Swords, X } from 'lucide-react';
 
 type SportFilter = Sport | 'all';
 
@@ -47,7 +47,6 @@ const ROAD_MAX_XP = 11000;
 const TIER_CARD_HEIGHT = 94;
 const TIER_CARD_SAFE_ZONE = 66;
 const MARKER_CLUSTER_GAP = 34;
-const TICK_INTERVAL = 200;
 
 function xpForSport(user: User, sport: SportFilter): number {
   if (sport === 'all') return user.xp;
@@ -116,46 +115,58 @@ function xpToY(xp: number) {
   return ROAD_TOP_PADDING + (1 - normalized) * ROAD_HEIGHT;
 }
 
-function getTierCenterXP(tier: RoadTier) {
-  if (tier.maxXP == null) return tier.minXP + (ROAD_MAX_XP - tier.minXP) * 0.5;
-  return tier.minXP + (tier.maxXP - tier.minXP) * 0.5;
-}
-
 function buildTierAnchors(roadTiers: RoadTier[]) {
   const roadBottom = xpToY(0);
   const roadTop = xpToY(ROAD_MAX_XP);
   const minCenter = roadTop + TIER_CARD_HEIGHT / 2 + 8;
   const maxCenter = roadBottom - TIER_CARD_HEIGHT / 2 - 8;
 
-  const provisional = roadTiers.map((tier) => {
-    const rawY = xpToY(getTierCenterXP(tier));
+  const anchors = roadTiers.map((tier, index) => {
+    const boundaryXP = tier.minXP;
+    const baseY = xpToY(boundaryXP);
+    const y = index === 0 ? maxCenter : baseY;
     return {
       tierId: tier.id,
-      y: Math.max(minCenter, Math.min(maxCenter, rawY)),
+      y: Math.max(minCenter, Math.min(maxCenter, y)),
     };
   });
 
-  for (let i = provisional.length - 2; i >= 0; i -= 1) {
-    const below = provisional[i + 1];
-    const current = provisional[i];
-    current.y = Math.min(current.y, below.y - TIER_CARD_HEIGHT - 14);
+  for (let i = 1; i < anchors.length; i += 1) {
+    const below = anchors[i - 1];
+    const current = anchors[i];
+    const maxAllowedY = below.y - (TIER_CARD_HEIGHT + 18);
+    if (current.y > maxAllowedY) {
+      current.y = maxAllowedY;
+    }
   }
 
-  for (let i = 1; i < provisional.length; i += 1) {
-    const above = provisional[i - 1];
-    const current = provisional[i];
-    current.y = Math.max(current.y, above.y + TIER_CARD_HEIGHT + 14);
+  for (let i = anchors.length - 2; i >= 0; i -= 1) {
+    const above = anchors[i + 1];
+    const current = anchors[i];
+    const minAllowedY = above.y + (TIER_CARD_HEIGHT + 18);
+    if (current.y < minAllowedY) {
+      current.y = minAllowedY;
+    }
   }
 
-  provisional[0].y = maxCenter;
-  for (let i = 1; i < provisional.length; i += 1) {
-    provisional[i].y = Math.min(provisional[i].y, provisional[i - 1].y - (TIER_CARD_HEIGHT + 14));
-  }
-
-  return provisional.reduce<Record<string, number>>((acc, item) => {
+  return anchors.reduce<Record<string, number>>((acc, item) => {
     acc[item.tierId] = item.y;
     return acc;
   }, {});
+}
+
+function buildTierTicks(roadTiers: RoadTier[]) {
+  return roadTiers
+    .flatMap((tier) => {
+      const tierMax = tier.maxXP ?? ROAD_MAX_XP;
+      const span = tierMax - tier.minXP;
+      if (span <= 0) return [] as number[];
+
+      return [0.2, 0.4, 0.6, 0.8]
+        .map((ratio) => Math.round(tier.minXP + span * ratio))
+        .filter((xp, index, arr) => xp > tier.minXP && xp < tierMax && arr.indexOf(xp) === index);
+    })
+    .sort((a, b) => a - b);
 }
 
 function getTierUnlocks(tier: RoadTier) {
@@ -317,34 +328,9 @@ export function XPRoadDialog({
 
   const tierAnchors = useMemo(() => buildTierAnchors(roadTiers), [roadTiers]);
 
-  const tierUsers = useMemo(() => {
-    return roadTiers.reduce<Record<string, RoadMarker[]>>((acc, tier) => {
-      acc[tier.id] = [];
-      return acc;
-    }, {});
-  }, [roadTiers]);
-
-  const tierUsersPopulated = useMemo(() => {
-    const base = { ...tierUsers };
-    markerClusters.flatMap((cluster) => cluster.users).forEach((marker) => {
-      const tier = levelForXP(marker.xp);
-      base[tier.id] = [...(base[tier.id] ?? []), marker];
-    });
-
-    Object.keys(base).forEach((key) => {
-      base[key] = base[key]
-        .sort((a, b) => Number(b.isMe) - Number(a.isMe) || b.xp - a.xp)
-        .filter((marker, index, arr) => arr.findIndex((item) => item.user.id === marker.user.id) === index);
-    });
-
-    return base;
-  }, [markerClusters, tierUsers]);
 
   const visibleTicks = useMemo(() => {
-    const ticks: number[] = [];
-    for (let xp = TICK_INTERVAL; xp <= ROAD_MAX_XP; xp += TICK_INTERVAL) {
-      ticks.push(xp);
-    }
+    const ticks = buildTierTicks(roadTiers);
 
     return ticks.filter((xp) => {
       const y = xpToY(xp);
@@ -494,10 +480,9 @@ export function XPRoadDialog({
                   })}
 
                   {roadTiers.map((tier) => {
-                    const y = tierAnchors[tier.id] ?? xpToY(getTierCenterXP(tier));
+                    const y = tierAnchors[tier.id] ?? xpToY(tier.minXP);
                     const tierActive = myXP >= tier.minXP && (tier.maxXP == null || myXP < tier.maxXP);
                     const tierUnlocked = myXP >= tier.minXP;
-                    const usersInTier = tierUsersPopulated[tier.id] ?? [];
                     return (
                       <div
                         key={tier.id}
@@ -525,30 +510,6 @@ export function XPRoadDialog({
                               </div>
                               <p className="text-xs text-muted-foreground">{formatTierRange(tier)}</p>
                             </div>
-                            {usersInTier.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => setSelectedCluster({ id: `tier-${tier.id}`, y, users: usersInTier })}
-                                className="mr-1 flex shrink-0 items-center rounded-full border border-border/60 bg-background/90 px-1.5 py-1 transition hover:bg-secondary/80"
-                                aria-label={`View all profiles in ${tier.name}`}
-                              >
-                                <div className="flex items-center">
-                                  {usersInTier.slice(0, 4).map((marker, index) => (
-                                    <div key={marker.user.id} className={cn('relative', index > 0 && '-ml-2.5')}>
-                                      <Avatar className={cn('h-7 w-7 border-2 shadow-sm', marker.isMe ? 'border-red-500' : 'border-background')}>
-                                        <AvatarImage src={marker.user.profilePhotoUrl} alt={marker.user.username} />
-                                        <AvatarFallback>{getInitials(marker.user.username)}</AvatarFallback>
-                                      </Avatar>
-                                    </div>
-                                  ))}
-                                </div>
-                                {usersInTier.length > 4 && (
-                                  <div className="ml-1 flex h-6 min-w-6 items-center justify-center rounded-full bg-secondary px-1.5 text-[10px] font-semibold">
-                                    +{usersInTier.length - 4}
-                                  </div>
-                                )}
-                              </button>
-                            )}
                             <button
                               type="button"
                               onClick={() => setSelectedTier(tier)}
