@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -6,6 +7,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import AuthGate from "@/auth/AuthGate";
 import { AppProvider } from "@/context/AppContext";
 import { BottomNav } from "@/components/BottomNav";
+import { TabSwipeContainer } from "@/components/TabSwipeContainer";
 
 import Home from "./pages/Home";
 import MapView from "./pages/MapView";
@@ -32,6 +34,8 @@ import Settings from "./pages/Settings";
 
 const queryClient = new QueryClient();
 
+const withTabSwipe = (element: ReactNode) => <TabSwipeContainer>{element}</TabSwipeContainer>;
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AppProvider>
@@ -41,8 +45,8 @@ const App = () => (
         <BrowserRouter>
           <AuthGate>
             <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/map" element={<MapView />} />
+              <Route path="/" element={withTabSwipe(<Home />)} />
+              <Route path="/map" element={withTabSwipe(<MapView />)} />
               <Route path="/create-game" element={<CreateGame />} />
 
               <Route path="/game/:id" element={<GameDetail />} />
@@ -50,10 +54,10 @@ const App = () => (
               <Route path="/game/:id/live" element={<LiveGame />} />
               <Route path="/game/:id/postgame" element={<PostGame />} />
 
-              <Route path="/profile" element={<Profile />} />
+              <Route path="/profile" element={withTabSwipe(<Profile />)} />
               <Route path="/edit-profile" element={<EditProfile />} />
               <Route path="/profile/:id" element={<Profile />} />
-              <Route path="/leaderboards" element={<Leaderboards />} />
+              <Route path="/leaderboards" element={withTabSwipe(<Leaderboards />)} />
               <Route path="/tournaments" element={<Tournaments />} />
               <Route path="/create-tournament" element={<CreateTournament />} />
               <Route path="/tournament/:id" element={<TournamentDetail />} />
@@ -61,7 +65,7 @@ const App = () => (
               <Route path="/friends" element={<Friends />} />
               <Route path="/history" element={<GameHistory />} />
               <Route path="/messages" element={<Messages />} />
-              <Route path="/squads" element={<Squads />} />
+              <Route path="/squads" element={withTabSwipe(<Squads />)} />
               <Route path="/squad/:id" element={<SquadDetail />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/onboarding" element={<Onboarding />} />
