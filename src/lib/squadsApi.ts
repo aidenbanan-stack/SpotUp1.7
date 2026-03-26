@@ -50,8 +50,56 @@ export type SquadMemberProfile = {
   user_id: string;
   role: string;
   username: string | null;
+  city?: string | null;
+  reliability_score?: number;
   xp: number;
   level: number;
+};
+
+export type SquadApplicant = {
+  id: string;
+  squad_id: string;
+  user_id: string;
+  username: string | null;
+  city: string | null;
+  xp: number;
+  reliability_score: number;
+  message: string;
+  status: string;
+  created_at: string;
+};
+
+export type SquadInviteRecord = {
+  id: string;
+  squad_id: string;
+  squad_name: string;
+  invited_user_id: string;
+  invited_by: string;
+  invited_by_username: string | null;
+  invited_user_username: string | null;
+  message: string;
+  status: string;
+  created_at: string;
+  expires_at: string | null;
+};
+
+export type SquadAnnouncement = {
+  id: string;
+  squad_id: string;
+  author_id: string;
+  author_username: string | null;
+  title: string;
+  body: string;
+  is_pinned: boolean;
+  created_at: string;
+};
+
+export type SquadInviteCandidate = {
+  id: string;
+  username: string | null;
+  city: string | null;
+  xp: number;
+  reliability_score: number;
 };
 
 export type SquadLeaderboardRow = {
@@ -310,7 +358,7 @@ export async function fetchSquadById(squadId: string): Promise<SquadRow> {
 export async function fetchSquadMembers(squadId: string): Promise<SquadMemberProfile[]> {
   const { data, error } = await supabase
     .from('squad_members')
-    .select('squad_id, user_id, role, profiles:profiles(id, username, xp)')
+    .select('squad_id, user_id, role, profiles:profiles(id, username, xp, city, reliability_score)')
     .eq('squad_id', squadId);
 
   if (error) throw error;
@@ -323,6 +371,8 @@ export async function fetchSquadMembers(squadId: string): Promise<SquadMemberPro
       user_id: row.user_id,
       role: row.role ?? 'member',
       username: p?.username ?? null,
+      city: p?.city ?? null,
+      reliability_score: Number(p?.reliability_score ?? 100),
       xp: Number.isFinite(xp) ? xp : 0,
       level: Math.max(1, Math.floor((Number.isFinite(xp) ? xp : 0) / 100) + 1),
     } as SquadMemberProfile;
@@ -728,4 +778,376 @@ export async function logSquadAudit(args: { squadId: string; action: string; met
   } catch {
     // safe no-op for environments that have not run the phase 7 patch yet
   }
+}
+
+
+async function createNotification(payload: {
+  user_id: string;
+  type: string;
+  message: string;
+  related_user_id?: string | null;
+}) {
+  try {
+    await supabase.from('notifications').insert({
+      user_id: payload.user_id,
+      type: payload.type,
+      message: payload.message,
+      related_user_id: payload.related_user_id ?? null,
+    });
+  } catch {
+    // best effort only
+  }
+}
+
+export async function fetchSquadJoinRequests(squadId: string): Promise<SquadApplicant[]> {
+  const { data, error } = await supabase
+    .from('squad_join_requests')
+    .select('id, squad_id, user_id, message, status, created_at, profiles:profiles!squad_join_requests_user_id_fkey(id, username, city, xp, reliability_score)')
+    .eq('squad_id', squadId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    squad_id: row.squad_id,
+    user_id: row.user_id,
+    username: row.profiles?.username ?? null,
+    city: row.profiles?.city ?? null,
+    xp: Number(row.profiles?.xp ?? 0),
+    reliability_score: Number(row.profiles?.reliability_score ?? 100),
+    message: row.message ?? '',
+    status: row.status ?? 'pending',
+    created_at: row.created_at,
+  }));
+}
+
+export async function submitSquadJoinRequest(args: {
+  squadId: string;
+  userId: string;
+  message?: string;
+}): Promise<void> {
+  const cleanMessage = args.message?.trim() || '';
+  const { data: existing, error: existingError } = await supabase
+    .from('squad_join_requests')
+    .select('id, status')
+    .eq('squad_id', args.squadId)
+    .eq('user_id', args.userId)
+    .in('status', ['pending', 'approved'])
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing) throw new Error(existing.status === 'approved' ? 'You already joined this squad.' : 'You already have a pending request.');
+
+  const { error } = await supabase.from('squad_join_requests').insert({
+    squad_id: args.squadId,
+    user_id: args.userId,
+    message: cleanMessage || null,
+    status: 'pending',
+  });
+  if (error) throw error;
+  await logSquadAudit({ squadId: args.squadId, action: 'join_request_created', metadata: { user_id: args.userId } });
+}
+
+export async function reviewSquadJoinRequest(args: {
+  squadId: string;
+  requestId: string;
+  reviewByUserId: string;
+  approve: boolean;
+}): Promise<void> {
+  const { data: req, error: reqError } = await supabase
+    .from('squad_join_requests')
+    .select('id, squad_id, user_id, status')
+    .eq('id', args.requestId)
+    .eq('squad_id', args.squadId)
+    .single();
+  if (reqError) throw reqError;
+
+  const status = args.approve ? 'approved' : 'declined';
+  const { error } = await supabase
+    .from('squad_join_requests')
+    .update({ status, reviewed_by: args.reviewByUserId, reviewed_at: new Date().toISOString() })
+    .eq('id', args.requestId);
+  if (error) throw error;
+
+  if (args.approve) {
+    const { error: memberError } = await supabase
+      .from('squad_members')
+      .upsert({ squad_id: args.squadId, user_id: req.user_id, role: 'member' }, { onConflict: 'squad_id,user_id' });
+    if (memberError) throw memberError;
+    await supabase.from('squad_feed_events').insert({
+      squad_id: args.squadId,
+      event_type: 'member',
+      title: 'New member approved',
+      body: 'A new player was accepted into the squad.',
+      actor_user_id: req.user_id,
+    });
+    await createNotification({
+      user_id: req.user_id,
+      type: 'squad_join_request_approved',
+      message: 'Your squad application was approved.',
+      related_user_id: args.reviewByUserId,
+    });
+  } else {
+    await createNotification({
+      user_id: req.user_id,
+      type: 'squad_join_request_declined',
+      message: 'Your squad application was declined.',
+      related_user_id: args.reviewByUserId,
+    });
+  }
+
+  await logSquadAudit({
+    squadId: args.squadId,
+    action: args.approve ? 'join_request_approved' : 'join_request_declined',
+    metadata: { request_id: args.requestId, target_user_id: req.user_id },
+  });
+}
+
+export async function fetchSquadInvites(squadId: string): Promise<SquadInviteRecord[]> {
+  const { data, error } = await supabase
+    .from('squad_invites')
+    .select('id, squad_id, invited_user_id, invited_by, message, status, created_at, expires_at, invited_user:profiles!squad_invites_invited_user_id_fkey(username), inviter:profiles!squad_invites_invited_by_fkey(username), squads(name)')
+    .eq('squad_id', squadId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    squad_id: row.squad_id,
+    squad_name: row.squads?.name ?? 'Squad',
+    invited_user_id: row.invited_user_id,
+    invited_by: row.invited_by,
+    invited_by_username: row.inviter?.username ?? null,
+    invited_user_username: row.invited_user?.username ?? null,
+    message: row.message ?? '',
+    status: row.status ?? 'pending',
+    created_at: row.created_at,
+    expires_at: row.expires_at ?? null,
+  }));
+}
+
+export async function fetchMyPendingSquadInvites(userId: string): Promise<SquadInviteRecord[]> {
+  const { data, error } = await supabase
+    .from('squad_invites')
+    .select('id, squad_id, invited_user_id, invited_by, message, status, created_at, expires_at, inviter:profiles!squad_invites_invited_by_fkey(username), squads(name)')
+    .eq('invited_user_id', userId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    squad_id: row.squad_id,
+    squad_name: row.squads?.name ?? 'Squad',
+    invited_user_id: row.invited_user_id,
+    invited_by: row.invited_by,
+    invited_by_username: row.inviter?.username ?? null,
+    invited_user_username: null,
+    message: row.message ?? '',
+    status: row.status ?? 'pending',
+    created_at: row.created_at,
+    expires_at: row.expires_at ?? null,
+  }));
+}
+
+export async function createSquadInvite(args: {
+  squadId: string;
+  invitedUserId: string;
+  invitedByUserId: string;
+  message?: string;
+}): Promise<void> {
+  const { data: existingMembership } = await supabase
+    .from('squad_members')
+    .select('user_id')
+    .eq('squad_id', args.squadId)
+    .eq('user_id', args.invitedUserId)
+    .maybeSingle();
+  if (existingMembership) throw new Error('That player is already in this squad.');
+
+  const { data: existingInvite } = await supabase
+    .from('squad_invites')
+    .select('id')
+    .eq('squad_id', args.squadId)
+    .eq('invited_user_id', args.invitedUserId)
+    .eq('status', 'pending')
+    .maybeSingle();
+  if (existingInvite) throw new Error('That player already has a pending invite.');
+
+  const { error } = await supabase.from('squad_invites').insert({
+    squad_id: args.squadId,
+    invited_user_id: args.invitedUserId,
+    invited_by: args.invitedByUserId,
+    message: args.message?.trim() || null,
+    status: 'pending',
+    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+  });
+  if (error) throw error;
+  await createNotification({
+    user_id: args.invitedUserId,
+    type: 'squad_invite',
+    message: 'You received a squad invite.',
+    related_user_id: args.invitedByUserId,
+  });
+  await logSquadAudit({ squadId: args.squadId, action: 'squad_invite_created', metadata: { invited_user_id: args.invitedUserId } });
+}
+
+export async function respondSquadInvite(args: {
+  inviteId: string;
+  userId: string;
+  accept: boolean;
+}): Promise<string> {
+  const { data: invite, error: inviteError } = await supabase
+    .from('squad_invites')
+    .select('id, squad_id, invited_user_id, invited_by, status')
+    .eq('id', args.inviteId)
+    .single();
+  if (inviteError) throw inviteError;
+  if (invite.invited_user_id !== args.userId) throw new Error('You cannot respond to this invite.');
+
+  const status = args.accept ? 'accepted' : 'declined';
+  const { error } = await supabase.from('squad_invites').update({ status }).eq('id', args.inviteId);
+  if (error) throw error;
+
+  if (args.accept) {
+    const { error: memberError } = await supabase
+      .from('squad_members')
+      .upsert({ squad_id: invite.squad_id, user_id: args.userId, role: 'member' }, { onConflict: 'squad_id,user_id' });
+    if (memberError) throw memberError;
+    await supabase.from('squad_feed_events').insert({
+      squad_id: invite.squad_id,
+      event_type: 'member',
+      title: 'Invite accepted',
+      body: 'A player joined through a squad invite.',
+      actor_user_id: args.userId,
+    });
+  }
+
+  await createNotification({
+    user_id: invite.invited_by,
+    type: args.accept ? 'squad_invite_accepted' : 'squad_invite_declined',
+    message: args.accept ? 'A player accepted your squad invite.' : 'A player declined your squad invite.',
+    related_user_id: args.userId,
+  });
+  await logSquadAudit({ squadId: invite.squad_id, action: args.accept ? 'squad_invite_accepted' : 'squad_invite_declined', metadata: { invite_id: args.inviteId, target_user_id: args.userId } });
+  return invite.squad_id;
+}
+
+export async function revokeSquadInvite(args: { squadId: string; inviteId: string }): Promise<void> {
+  const { error } = await supabase.from('squad_invites').update({ status: 'revoked' }).eq('id', args.inviteId).eq('squad_id', args.squadId);
+  if (error) throw error;
+  await logSquadAudit({ squadId: args.squadId, action: 'squad_invite_revoked', metadata: { invite_id: args.inviteId } });
+}
+
+export async function searchProfilesForSquadInvites(args: {
+  squadId: string;
+  query: string;
+}): Promise<SquadInviteCandidate[]> {
+  const query = args.query.trim();
+  if (!query) return [];
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, username, city, xp, reliability_score')
+    .ilike('username', `%${query}%`)
+    .limit(8);
+  if (error) throw error;
+
+  const { data: members } = await supabase.from('squad_members').select('user_id').eq('squad_id', args.squadId);
+  const memberSet = new Set((members ?? []).map((row: any) => row.user_id as string));
+  return (data ?? [])
+    .filter((row: any) => !memberSet.has(row.id))
+    .map((row: any) => ({
+      id: row.id,
+      username: row.username ?? null,
+      city: row.city ?? null,
+      xp: Number(row.xp ?? 0),
+      reliability_score: Number(row.reliability_score ?? 100),
+    }));
+}
+
+export async function updateSquadMemberRole(args: {
+  squadId: string;
+  memberUserId: string;
+  nextRole: string;
+}): Promise<void> {
+  const { error } = await supabase
+    .from('squad_members')
+    .update({ role: args.nextRole })
+    .eq('squad_id', args.squadId)
+    .eq('user_id', args.memberUserId);
+  if (error) throw error;
+  await logSquadAudit({ squadId: args.squadId, action: 'member_role_updated', metadata: { target_user_id: args.memberUserId, role: args.nextRole } });
+}
+
+export async function removeSquadMember(args: {
+  squadId: string;
+  memberUserId: string;
+}): Promise<void> {
+  const { error } = await supabase
+    .from('squad_members')
+    .delete()
+    .eq('squad_id', args.squadId)
+    .eq('user_id', args.memberUserId);
+  if (error) throw error;
+  await logSquadAudit({ squadId: args.squadId, action: 'member_removed', metadata: { target_user_id: args.memberUserId } });
+}
+
+export async function banSquadUser(args: {
+  squadId: string;
+  memberUserId: string;
+  bannedByUserId: string;
+  reason?: string;
+}): Promise<void> {
+  await removeSquadMember({ squadId: args.squadId, memberUserId: args.memberUserId });
+  const { error } = await supabase.from('squad_bans').upsert({
+    squad_id: args.squadId,
+    user_id: args.memberUserId,
+    banned_by: args.bannedByUserId,
+    reason: args.reason?.trim() || null,
+  });
+  if (error) throw error;
+  await logSquadAudit({ squadId: args.squadId, action: 'member_banned', metadata: { target_user_id: args.memberUserId, reason: args.reason ?? null } });
+}
+
+export async function fetchSquadAnnouncements(squadId: string): Promise<SquadAnnouncement[]> {
+  const { data, error } = await supabase
+    .from('squad_announcements')
+    .select('id, squad_id, author_id, title, body, is_pinned, created_at, profiles:profiles!squad_announcements_author_id_fkey(username)')
+    .eq('squad_id', squadId)
+    .order('is_pinned', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(12);
+  if (error) throw error;
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    squad_id: row.squad_id,
+    author_id: row.author_id,
+    author_username: row.profiles?.username ?? null,
+    title: row.title,
+    body: row.body,
+    is_pinned: Boolean(row.is_pinned),
+    created_at: row.created_at,
+  }));
+}
+
+export async function createSquadAnnouncement(args: {
+  squadId: string;
+  authorId: string;
+  title: string;
+  body: string;
+  isPinned?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.from('squad_announcements').insert({
+    squad_id: args.squadId,
+    author_id: args.authorId,
+    title: args.title.trim(),
+    body: args.body.trim(),
+    is_pinned: Boolean(args.isPinned),
+  });
+  if (error) throw error;
+  await supabase.from('squad_feed_events').insert({
+    squad_id: args.squadId,
+    event_type: 'announcement',
+    title: args.title.trim(),
+    body: args.body.trim(),
+    actor_user_id: args.authorId,
+  });
+  await logSquadAudit({ squadId: args.squadId, action: 'announcement_created', metadata: { title: args.title.trim() } });
 }
