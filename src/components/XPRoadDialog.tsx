@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 import { fetchMyFriends } from '@/lib/socialApi';
 import PlayerProfileDialog from '@/components/PlayerProfileDialog';
 import { PLAYER_LEVELS, SPORTS, Sport, User } from '@/types';
-import { ChevronUp, Crown, Info, Lock, Sparkles, Swords, X } from 'lucide-react';
+import { ChevronUp, Crown, Info, Lock, Sparkles, Swords, Users, X } from 'lucide-react';
 
 type SportFilter = Sport | 'all';
 
@@ -40,12 +40,11 @@ type MarkerCluster = {
   users: RoadMarker[];
 };
 
-const ROAD_HEIGHT = 2600;
 const ROAD_TOP_PADDING = 96;
 const ROAD_BOTTOM_PADDING = 72;
 const ROAD_MAX_XP = 11000;
 const TIER_CARD_HEIGHT = 94;
-const TIER_CARD_SAFE_ZONE = 66;
+const TIER_SECTION_HEIGHT = 320;
 const MARKER_CLUSTER_GAP = 34;
 
 function xpForSport(user: User, sport: SportFilter): number {
@@ -110,63 +109,53 @@ function buildRoadTiers(): RoadTier[] {
   }));
 }
 
-function xpToY(xp: number) {
-  const normalized = clamp01(xp / ROAD_MAX_XP);
-  return ROAD_TOP_PADDING + (1 - normalized) * ROAD_HEIGHT;
+function getTierIndexForXP(xp: number, roadTiers: RoadTier[]) {
+  for (let index = roadTiers.length - 1; index >= 0; index -= 1) {
+    if (xp >= roadTiers[index].minXP) return index;
+  }
+  return 0;
+}
+
+function roadHeightForTierCount(tierCount: number) {
+  return Math.max(0, (tierCount - 1) * TIER_SECTION_HEIGHT) + TIER_CARD_HEIGHT + ROAD_TOP_PADDING + ROAD_BOTTOM_PADDING;
+}
+
+function tierAnchorY(index: number, roadTiers: RoadTier[]) {
+  const roadHeight = roadHeightForTierCount(roadTiers.length);
+  const roadBottom = roadHeight - ROAD_BOTTOM_PADDING - TIER_CARD_HEIGHT / 2;
+  return roadBottom - index * TIER_SECTION_HEIGHT;
+}
+
+function xpToY(xp: number, roadTiers: RoadTier[]) {
+  const clampedXP = Math.max(0, Math.min(ROAD_MAX_XP, xp));
+  const tierIndex = getTierIndexForXP(clampedXP, roadTiers);
+  const tier = roadTiers[tierIndex];
+  const tierMax = tier.maxXP ?? ROAD_MAX_XP;
+  const span = Math.max(1, tierMax - tier.minXP);
+  const progress = clamp01((clampedXP - tier.minXP) / span);
+  return tierAnchorY(tierIndex, roadTiers) - progress * TIER_SECTION_HEIGHT;
 }
 
 function buildTierAnchors(roadTiers: RoadTier[]) {
-  const roadBottom = xpToY(0);
-  const roadTop = xpToY(ROAD_MAX_XP);
-  const minCenter = roadTop + TIER_CARD_HEIGHT / 2 + 8;
-  const maxCenter = roadBottom - TIER_CARD_HEIGHT / 2 - 8;
-
-  const anchors = roadTiers.map((tier, index) => {
-    const boundaryXP = tier.minXP;
-    const baseY = xpToY(boundaryXP);
-    const y = index === 0 ? maxCenter : baseY;
-    return {
-      tierId: tier.id,
-      y: Math.max(minCenter, Math.min(maxCenter, y)),
-    };
-  });
-
-  for (let i = 1; i < anchors.length; i += 1) {
-    const below = anchors[i - 1];
-    const current = anchors[i];
-    const maxAllowedY = below.y - (TIER_CARD_HEIGHT + 18);
-    if (current.y > maxAllowedY) {
-      current.y = maxAllowedY;
-    }
-  }
-
-  for (let i = anchors.length - 2; i >= 0; i -= 1) {
-    const above = anchors[i + 1];
-    const current = anchors[i];
-    const minAllowedY = above.y + (TIER_CARD_HEIGHT + 18);
-    if (current.y < minAllowedY) {
-      current.y = minAllowedY;
-    }
-  }
-
-  return anchors.reduce<Record<string, number>>((acc, item) => {
-    acc[item.tierId] = item.y;
+  return roadTiers.reduce<Record<string, number>>((acc, tier, index) => {
+    acc[tier.id] = tierAnchorY(index, roadTiers);
     return acc;
   }, {});
 }
 
 function buildTierTicks(roadTiers: RoadTier[]) {
-  return roadTiers
-    .flatMap((tier) => {
-      const tierMax = tier.maxXP ?? ROAD_MAX_XP;
-      const span = tierMax - tier.minXP;
-      if (span <= 0) return [] as number[];
+  return roadTiers.flatMap((tier, tierIndex) => {
+    const tierMax = tier.maxXP ?? ROAD_MAX_XP;
+    const span = tierMax - tier.minXP;
+    if (span <= 0) return [] as Array<{ xp: number; tierId: string; key: string; indexInTier: number }>;
 
-      return [0.2, 0.4, 0.6, 0.8]
-        .map((ratio) => Math.round(tier.minXP + span * ratio))
-        .filter((xp, index, arr) => xp > tier.minXP && xp < tierMax && arr.indexOf(xp) === index);
-    })
-    .sort((a, b) => a - b);
+    return [0.2, 0.4, 0.6, 0.8].map((ratio, indexInTier) => ({
+      xp: Math.round(tier.minXP + span * ratio),
+      tierId: tier.id,
+      key: `${tier.id}-${indexInTier}`,
+      indexInTier,
+    }));
+  });
 }
 
 function getTierUnlocks(tier: RoadTier) {
@@ -314,32 +303,21 @@ export function XPRoadDialog({
   const markerClusters = useMemo(() => {
     if (!me) return [];
     const markers: RoadMarker[] = [
-      { user: me, xp: myXP, y: xpToY(myXP), isMe: true },
+      { user: me, xp: myXP, y: xpToY(myXP, roadTiers), isMe: true },
       ...friendsRanked.map(({ user: friend, xp }) => ({
         user: friend,
         xp,
-        y: xpToY(xp),
+        y: xpToY(xp, roadTiers),
         isMe: false,
       })),
     ];
 
     return clusterMarkers(markers);
-  }, [friendsRanked, me, myXP]);
+  }, [friendsRanked, me, myXP, roadTiers]);
 
   const tierAnchors = useMemo(() => buildTierAnchors(roadTiers), [roadTiers]);
-
-
-  const visibleTicks = useMemo(() => {
-    const ticks = buildTierTicks(roadTiers);
-
-    return ticks.filter((xp) => {
-      const y = xpToY(xp);
-      return !roadTiers.some((tier) => {
-        const anchorY = tierAnchors[tier.id];
-        return Math.abs(y - anchorY) < TIER_CARD_SAFE_ZONE;
-      });
-    });
-  }, [roadTiers, tierAnchors]);
+  const roadHeight = useMemo(() => roadHeightForTierCount(roadTiers.length), [roadTiers]);
+  const visibleTicks = useMemo(() => buildTierTicks(roadTiers), [roadTiers]);
 
   const openProfile = (userId: string) => {
     setSelectedUserId(userId);
@@ -460,19 +438,19 @@ export function XPRoadDialog({
                 >
                   <div className="absolute bottom-[36px] left-1/2 top-[36px] w-[6px] -translate-x-1/2 rounded-full bg-gradient-to-t from-primary via-primary/80 to-primary/30 shadow-[0_0_24px_rgba(239,68,68,0.35)]" />
 
-                  {visibleTicks.map((tickXp, index) => {
-                    const y = xpToY(tickXp);
+                  {visibleTicks.map((tick) => {
+                    const y = xpToY(tick.xp, roadTiers);
                     return (
-                      <div key={`tick-${tickXp}`} className="absolute left-1/2 z-[1]" style={{ top: y, transform: 'translate(-50%, -50%)' }}>
+                      <div key={tick.key} className="absolute left-1/2 z-[1]" style={{ top: y, transform: 'translate(-50%, -50%)' }}>
                         <div className="relative h-5 w-0">
                           <div className="absolute left-1/2 top-1/2 h-[3px] w-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/85 shadow-sm" />
                           <div
                             className={cn(
                               'absolute top-1/2 -translate-y-1/2 whitespace-nowrap text-xs font-semibold leading-none text-muted-foreground',
-                              index % 2 === 0 ? 'left-[28px]' : 'right-[28px] text-right',
+                              tick.indexInTier % 2 === 0 ? 'left-[28px]' : 'right-[28px] text-right',
                             )}
                           >
-                            {tickXp.toLocaleString()} XP
+                            {tick.xp.toLocaleString()} XP
                           </div>
                         </div>
                       </div>
@@ -480,7 +458,7 @@ export function XPRoadDialog({
                   })}
 
                   {roadTiers.map((tier) => {
-                    const y = tierAnchors[tier.id] ?? xpToY(tier.minXP);
+                    const y = tierAnchors[tier.id] ?? xpToY(tier.minXP, roadTiers);
                     const tierActive = myXP >= tier.minXP && (tier.maxXP == null || myXP < tier.maxXP);
                     const tierUnlocked = myXP >= tier.minXP;
                     return (
