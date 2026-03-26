@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 import { fetchMyFriends } from '@/lib/socialApi';
 import PlayerProfileDialog from '@/components/PlayerProfileDialog';
 import { PLAYER_LEVELS, SPORTS, Sport, User } from '@/types';
-import { ChevronUp, Crown, Info, Lock, Sparkles, Swords, Users } from 'lucide-react';
+import { ChevronUp, Crown, Info, Lock, Sparkles, Swords, Users, X } from 'lucide-react';
 
 type SportFilter = Sport | 'all';
 
@@ -111,6 +111,14 @@ function buildRoadTiers(): RoadTier[] {
 function xpToY(xp: number) {
   const normalized = clamp01(xp / ROAD_MAX_XP);
   return ROAD_TOP_PADDING + (1 - normalized) * ROAD_HEIGHT;
+}
+
+function tierToY(index: number, total: number) {
+  if (total <= 1) return ROAD_TOP_PADDING + ROAD_HEIGHT / 2;
+  const topAnchor = ROAD_TOP_PADDING + 84;
+  const bottomAnchor = ROAD_TOP_PADDING + ROAD_HEIGHT - 84;
+  const step = (bottomAnchor - topAnchor) / (total - 1);
+  return bottomAnchor - index * step;
 }
 
 function getTierUnlocks(tier: RoadTier) {
@@ -290,6 +298,14 @@ export function XPRoadDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="inset-0 left-0 right-0 top-0 bottom-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 rounded-none border-0 bg-background p-0 shadow-none sm:inset-0 sm:h-[100dvh] sm:w-screen sm:max-w-none sm:rounded-none">
           <DialogHeader className="sticky top-0 z-20 border-b border-border/50 bg-background/95 px-4 pb-3 pt-5 backdrop-blur sm:px-6">
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="absolute right-4 top-4 z-30 flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/90 text-foreground shadow-sm transition hover:bg-secondary"
+              aria-label="Close XP Road"
+            >
+              <X className="h-5 w-5" />
+            </button>
             <div className="mx-auto mb-2 h-1.5 w-14 rounded-full bg-muted sm:hidden" />
             <div className="space-y-3 pr-10 text-left">
               <div>
@@ -393,9 +409,14 @@ export function XPRoadDialog({
                     const y = xpToY(dropXp);
                     return (
                       <div key={`drop-${dropXp}`} className="absolute left-1/2 z-[1]" style={{ top: y, transform: 'translate(-50%, -50%)' }}>
-                        <div className="relative flex items-center justify-center">
-                          <div className="h-[3px] w-8 rounded-full bg-white/85 shadow-sm" />
-                          <div className={cn('absolute text-xs font-semibold text-muted-foreground', index % 2 === 0 ? 'left-5' : 'right-5 text-right')}>
+                        <div className="relative h-5 w-0">
+                          <div className="absolute left-1/2 top-1/2 h-[3px] w-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/85 shadow-sm" />
+                          <div
+                            className={cn(
+                              'absolute top-1/2 -translate-y-1/2 whitespace-nowrap text-xs font-semibold leading-none text-muted-foreground',
+                              index % 2 === 0 ? 'left-[26px]' : 'right-[26px] text-right',
+                            )}
+                          >
                             {dropXp.toLocaleString()} XP
                           </div>
                         </div>
@@ -403,14 +424,14 @@ export function XPRoadDialog({
                     );
                   })}
 
-                  {roadTiers.map((tier) => {
-                    const y = xpToY(tier.minXP);
+                  {roadTiers.map((tier, index) => {
+                    const y = tierToY(index, roadTiers.length);
                     const tierActive = myXP >= tier.minXP && (tier.maxXP == null || myXP < tier.maxXP);
                     const tierUnlocked = myXP >= tier.minXP;
                     return (
                       <div
                         key={tier.id}
-                        className="absolute left-1/2 z-[3] w-[min(86vw,320px)]"
+                        className="absolute left-1/2 z-[3] w-[min(84vw,340px)]"
                         style={{ top: y, transform: 'translate(-50%, -50%)' }}
                       >
                         <div
