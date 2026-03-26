@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { MapPin, ShieldCheck, Sword, Trophy, Users } from 'lucide-react';
+import { MapPin, ShieldCheck, Sword, Trophy, Trash2, Users } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { SPORTS } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useToast } from '@/components/ui/use-toast';
-import { fetchMySquads, fetchSquadById, fetchSquadMembers, leaveSquadById, type SquadRow, type SquadMemberProfile } from '@/lib/squadsApi';
+import {
+  deleteSquadById,
+  fetchMySquads,
+  fetchSquadById,
+  fetchSquadMembers,
+  leaveSquadById,
+  type SquadRow,
+  type SquadMemberProfile,
+} from '@/lib/squadsApi';
 
 export default function SquadDetail() {
   const { id = '' } = useParams();
@@ -16,6 +24,7 @@ export default function SquadDetail() {
 
   const [loading, setLoading] = useState(true);
   const [leaving, setLeaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [squad, setSquad] = useState<SquadRow | null>(null);
   const [members, setMembers] = useState<SquadMemberProfile[]>([]);
   const [isMember, setIsMember] = useState(false);
@@ -56,6 +65,7 @@ export default function SquadDetail() {
 
   const totalXp = useMemo(() => members.reduce((sum, m) => sum + (m.xp ?? 0), 0), [members]);
   const record = `${Number(squad?.wins ?? 0)}-${Number(squad?.losses ?? 0)}`;
+  const isOwner = user?.id != null && squad?.owner_id === user.id;
 
   const sortedMembers = useMemo(() => {
     const copy = [...members];
@@ -71,9 +81,8 @@ export default function SquadDetail() {
 
   async function onLeave() {
     if (!id) return;
-    const ownerId = squad?.owner_id ?? null;
-    if (ownerId && user?.id === ownerId) {
-      toast({ title: 'Owner cannot leave', description: 'Transfer or delete the squad first.', variant: 'destructive' });
+    if (isOwner) {
+      toast({ title: 'Owner cannot leave', description: 'Delete the squad instead.', variant: 'destructive' });
       return;
     }
     setLeaving(true);
@@ -86,6 +95,23 @@ export default function SquadDetail() {
       toast({ title: 'Could not leave squad', description: e?.message ?? 'Please try again.', variant: 'destructive' });
     } finally {
       setLeaving(false);
+    }
+  }
+
+  async function onDelete() {
+    if (!id || !isOwner) return;
+    const confirmed = window.confirm('Delete this squad? This will remove all members and cannot be undone.');
+    if (!confirmed) return;
+    setDeleting(true);
+    try {
+      await deleteSquadById({ squadId: id });
+      toast({ title: 'Squad deleted' });
+      navigate('/squads');
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Could not delete squad', description: e?.message ?? 'Please try again.', variant: 'destructive' });
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -137,20 +163,28 @@ export default function SquadDetail() {
                 </div>
                 <div className="rounded-xl bg-secondary/40 p-3">
                   <div className="text-muted-foreground inline-flex items-center gap-1"><Users className="w-4 h-4" /> Join req</div>
-                  <div className="text-lg font-bold mt-1">{Number(squad.min_join_xp ?? 0)} XP</div>
+                  <div className="text-lg font-bold mt-1">{Number(squad.min_xp_required ?? 500)} XP</div>
                 </div>
               </div>
 
-              <div className="mt-4 flex items-center justify-between gap-3">
+              <div className="mt-4 flex items-center justify-between gap-3 flex-wrap">
                 <div className="text-sm">
                   <div className="text-muted-foreground">Invite code</div>
                   <div className="font-mono text-base">{squad.invite_code || '—'}</div>
                 </div>
-                {isMember ? (
-                  <Button variant="secondary" onClick={onLeave} disabled={leaving}>
-                    {leaving ? 'Leaving...' : 'Leave Squad'}
-                  </Button>
-                ) : null}
+                <div className="flex items-center gap-2">
+                  {isMember && !isOwner ? (
+                    <Button variant="secondary" onClick={onLeave} disabled={leaving}>
+                      {leaving ? 'Leaving...' : 'Leave Squad'}
+                    </Button>
+                  ) : null}
+                  {isOwner ? (
+                    <Button variant="destructive" onClick={onDelete} disabled={deleting}>
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      {deleting ? 'Deleting...' : 'Delete Squad'}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </>
           ) : (

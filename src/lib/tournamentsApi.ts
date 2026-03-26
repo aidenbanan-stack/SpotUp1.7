@@ -79,23 +79,18 @@ export async function createTournament(args: {
   notes: string | null;
 }): Promise<TournamentRow> {
   const { data, error } = await supabase
-    .from('tournaments')
-    .insert({
-      host_id: args.hostId,
-      name: args.name.trim(),
-      sport: args.sport,
-      format: args.format,
-      series_type: args.seriesType,
-      team_count: args.teamCount,
-      points_style: args.pointsStyle,
-      is_private: args.isPrivate,
-      join_mode: args.joinMode,
-      status: 'scheduled',
-      location: args.location,
-      starts_at: args.startsAtISO,
-      notes: args.notes,
+    .rpc('create_tournament_secure', {
+      p_name: args.name.trim(),
+      p_sport: args.sport,
+      p_format: args.format,
+      p_series_type: args.seriesType,
+      p_team_count: args.teamCount,
+      p_points_style: args.pointsStyle,
+      p_join_mode: args.joinMode,
+      p_location: args.location,
+      p_starts_at: args.startsAtISO,
+      p_notes: args.notes,
     })
-    .select('*')
     .single();
 
   if (error) throw error;

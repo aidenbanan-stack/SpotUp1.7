@@ -8,14 +8,13 @@ export type SquadRow = {
   owner_id: string | null;
   invite_code: string;
   created_at: string;
+  min_xp_required?: number;
+  member_limit?: number;
   wins?: number;
   losses?: number;
   points?: number;
   rating?: number;
   home_area?: string | null;
-  min_join_xp?: number;
-  member_cap?: number;
-  is_recruiting?: boolean;
 };
 
 export type SquadWithMeta = SquadRow & {
@@ -25,10 +24,9 @@ export type SquadWithMeta = SquadRow & {
 
 export type SquadDiscoverRow = SquadRow & {
   member_count: number;
-  owner_username: string | null;
-  owner_city: string | null;
   is_member: boolean;
   can_join: boolean;
+  is_nearby: boolean;
 };
 
 export type SquadMemberProfile = {
@@ -59,7 +57,6 @@ function rowToLeaderboard(row: any): SquadLeaderboardRow {
   const wins = Number(row.wins ?? 0);
   const losses = Number(row.losses ?? 0);
   const totalGames = wins + losses;
-  const winPct = totalGames > 0 ? wins / totalGames : 0;
   return {
     squad_id: row.squad_id ?? row.id,
     name: row.name,
@@ -70,7 +67,7 @@ function rowToLeaderboard(row: any): SquadLeaderboardRow {
     losses,
     points: Number(row.points ?? 0),
     rating: Number(row.rating ?? 1000),
-    win_pct: typeof row.win_pct === 'number' ? row.win_pct : winPct,
+    win_pct: totalGames > 0 ? wins / totalGames : 0,
     home_area: row.home_area ?? null,
     created_at: row.created_at,
   };
@@ -124,12 +121,14 @@ export async function createSquad(args: {
   userId: string;
   name: string;
   sport: Sport | null;
-  minJoinXp?: number;
+  homeArea?: string | null;
+  minXpRequired?: number;
 }): Promise<SquadRow> {
   const { data, error } = await supabase.rpc('create_squad_secure', {
     p_name: args.name.trim(),
     p_sport: args.sport,
-    p_min_join_xp: Math.max(0, Math.floor(args.minJoinXp ?? 0)),
+    p_home_area: args.homeArea?.trim() || null,
+    p_min_xp_required: Math.max(0, Math.floor(args.minXpRequired ?? 0)),
   });
 
   if (error) throw error;
@@ -142,20 +141,15 @@ export async function createSquad(args: {
 export async function searchSquads(args: {
   userId: string;
   query?: string;
-  area?: string | null;
   limit?: number;
 }): Promise<SquadDiscoverRow[]> {
   const { data, error } = await supabase.rpc('search_squads', {
     p_query: args.query?.trim() || null,
-    p_area: args.area?.trim() || null,
-    p_limit: args.limit ?? 20,
   });
 
   if (error) throw error;
 
-  const rows = (data ?? []) as any[];
-  if (!rows.length) return [];
-
+  const rows = ((data ?? []) as any[]).slice(0, args.limit ?? 30);
   const { data: myMemberships } = await supabase
     .from('squad_members')
     .select('squad_id')
@@ -175,18 +169,16 @@ export async function searchSquads(args: {
     points: Number(row.points ?? 0),
     rating: Number(row.rating ?? 1000),
     home_area: row.home_area ?? null,
-    min_join_xp: Number(row.min_join_xp ?? 0),
-    member_cap: Number(row.member_cap ?? 10),
-    is_recruiting: Boolean(row.is_recruiting ?? true),
+    min_xp_required: Number(row.min_xp_required ?? 0),
+    member_limit: Number(row.member_limit ?? 10),
     member_count: Number(row.member_count ?? 0),
-    owner_username: row.owner_username ?? null,
-    owner_city: row.owner_city ?? null,
+    is_nearby: Boolean(row.is_nearby),
     is_member: memberSet.has(row.id),
-    can_join: !memberSet.has(row.id) && Boolean(row.is_recruiting ?? true),
+    can_join: !memberSet.has(row.id),
   }));
 }
 
-export async function joinSquadById(args: { userId: string; squadId: string }): Promise<SquadRow> {
+export async function joinSquadById(args: { squadId: string }): Promise<SquadRow> {
   const { data, error } = await supabase.rpc('join_squad_secure', {
     p_squad_id: args.squadId,
   });
@@ -198,6 +190,13 @@ export async function joinSquadById(args: { userId: string; squadId: string }): 
 
 export async function leaveSquadById(args: { squadId: string }): Promise<void> {
   const { error } = await supabase.rpc('leave_squad_secure', {
+    p_squad_id: args.squadId,
+  });
+  if (error) throw error;
+}
+
+export async function deleteSquadById(args: { squadId: string }): Promise<void> {
+  const { error } = await supabase.rpc('delete_squad_secure', {
     p_squad_id: args.squadId,
   });
   if (error) throw error;
@@ -235,8 +234,8 @@ export async function fetchSquadLeaderboard(limit = 50): Promise<SquadLeaderboar
   const { data, error } = await supabase
     .from('squad_competitive_leaderboard')
     .select('*')
-    .order('points', { ascending: false })
     .order('rating', { ascending: false })
+    .order('points', { ascending: false })
     .limit(limit);
 
   if (!error) return (data ?? []).map(rowToLeaderboard);
@@ -265,6 +264,6 @@ export async function fetchSquadLeaderboard(limit = 50): Promise<SquadLeaderboar
       // ignore
     }
   }
-  out.sort((a, b) => (b.points - a.points) || (b.rating - a.rating) || (b.total_xp - a.total_xp));
+  out.sort((a, b) => (b.rating - a.rating) || (b.points - a.points) || (b.total_xp - a.total_xp));
   return out;
 }

@@ -213,7 +213,7 @@ export default function Leaderboards() {
                 : filteredSquads.map((s, idx) => {
                     const rank = idx + 1;
                     const sport = (s.sport ?? null) as any;
-                    const sportMeta = sport ? SPORTS.find((s) => s.id === sport) : null;
+                    const sportMeta = sport ? SPORTS.find((item) => item.id === sport) : null;
                     const icon = sportMeta?.icon ?? '👥';
                     const totalGames = s.wins + s.losses;
 

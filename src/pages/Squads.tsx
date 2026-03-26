@@ -32,7 +32,7 @@ export default function Squads() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newSport, setNewSport] = useState<Sport | 'none'>('none');
-  const [minJoinXp, setMinJoinXp] = useState('0');
+  const [minJoinXp, setMinJoinXp] = useState('500');
   const [busyJoinId, setBusyJoinId] = useState<string | null>(null);
 
   const joinUnlocked = (user?.xp ?? 0) >= 500;
@@ -69,7 +69,6 @@ export default function Squads() {
       const data = await searchSquads({
         userId: user.id,
         query: query ?? search,
-        area: user?.city ?? null,
         limit: 30,
       });
       setDiscoverSquads(data);
@@ -98,9 +97,8 @@ export default function Squads() {
   }, [search, tab, user?.city]);
 
   const areaSquads = useMemo(() => {
-    const city = (user?.city ?? '').trim().toLowerCase();
-    return discoverSquads.filter((s) => (s.home_area ?? s.owner_city ?? '').trim().toLowerCase() === city);
-  }, [discoverSquads, user?.city]);
+    return discoverSquads.filter((s) => s.is_nearby);
+  }, [discoverSquads]);
 
   const otherSquads = useMemo(() => {
     const areaIds = new Set(areaSquads.map((s) => s.id));
@@ -114,12 +112,13 @@ export default function Squads() {
         userId: user.id,
         name: newName.trim(),
         sport: newSport === 'none' ? null : (newSport as Sport),
-        minJoinXp: Number(minJoinXp || '0'),
+        homeArea: user.city,
+        minXpRequired: Number(minJoinXp || '500'),
       });
       setCreateOpen(false);
       setNewName('');
       setNewSport('none');
-      setMinJoinXp('0');
+      setMinJoinXp('500');
       await refreshMySquads();
       await refreshDiscover('');
       navigate(`/squad/${created.id}`);
@@ -133,7 +132,7 @@ export default function Squads() {
     if (!user?.id) return;
     setBusyJoinId(squadId);
     try {
-      await joinSquadById({ userId: user.id, squadId });
+      await joinSquadById({ squadId });
       await refreshMySquads();
       await refreshDiscover(search);
     } catch (e: any) {
@@ -146,7 +145,7 @@ export default function Squads() {
 
   const SquadCard = ({ squad, showJoin }: { squad: SquadDiscoverRow | SquadWithMeta; showJoin?: boolean }) => {
     const record = `${Number(squad.wins ?? 0)}-${Number(squad.losses ?? 0)}`;
-    const membersLabel = `${squad.member_count}/${Number(squad.member_cap ?? 10)}`;
+    const membersLabel = `${squad.member_count}/${Number(squad.member_limit ?? 10)}`;
     const discover = squad as SquadDiscoverRow;
     return (
       <div className="glass-card p-4">
@@ -170,9 +169,9 @@ export default function Squads() {
                   <span>{Number(squad.points ?? 0)} pts</span>
                   <span>Rtg {Number(squad.rating ?? 1000)}</span>
                 </div>
-                {(squad.home_area || discover.owner_city) ? (
+                {squad.home_area ? (
                   <div className="mt-1 text-xs text-muted-foreground inline-flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5" /> {squad.home_area || discover.owner_city}
+                    <MapPin className="w-3.5 h-3.5" /> {squad.home_area}
                   </div>
                 ) : null}
               </div>
@@ -192,11 +191,9 @@ export default function Squads() {
           ) : null}
         </div>
 
-        {'min_join_xp' in squad && Number(squad.min_join_xp ?? 0) > 0 ? (
-          <p className="mt-3 text-xs text-muted-foreground">
-            Minimum XP to join: {Number(squad.min_join_xp ?? 0).toLocaleString()}
-          </p>
-        ) : null}
+        <p className="mt-3 text-xs text-muted-foreground">
+          Minimum XP to join: {Number(squad.min_xp_required ?? 500).toLocaleString()}
+        </p>
       </div>
     );
   };
@@ -337,8 +334,8 @@ export default function Squads() {
             </div>
             <div className="space-y-2">
               <Label>Minimum XP to join</Label>
-              <Input value={minJoinXp} onChange={(e) => setMinJoinXp(e.target.value.replace(/[^0-9]/g, ''))} placeholder="0" />
-              <p className="text-xs text-muted-foreground">Only Pro-created squads can enforce this above 0.</p>
+              <Input value={minJoinXp} onChange={(e) => setMinJoinXp(e.target.value.replace(/[^0-9]/g, ''))} placeholder="500" />
+              <p className="text-xs text-muted-foreground">Pro-created squads can set this above 500. Free-created squads use 500 automatically.</p>
             </div>
             <Button onClick={onCreate} disabled={!newName.trim() || !createUnlocked} className="w-full">
               Create squad
