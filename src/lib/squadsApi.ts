@@ -1,6 +1,5 @@
 import { supabase } from '@/lib/supabaseClient';
-import { createNotification } from '@/lib/notificationsApi';
-import { fetchGameById, joinGame } from '@/lib/gamesApi';
+import { joinGame } from '@/lib/gamesApi';
 import type {
   Sport,
   SquadChannel,
@@ -218,37 +217,32 @@ export type SquadEventCard = {
   max_attendees: number | null;
 };
 
-export type SquadGameInviteRecord = {
-  id: string;
+export type SquadLeaderSquadOption = {
   squad_id: string;
-  squad_name: string;
-  game_id: string;
-  game_title: string;
-  invited_user_id: string;
-  invited_by: string;
-  invited_by_username: string | null;
-  message: string;
-  status: 'pending' | 'accepted' | 'declined' | 'revoked';
-  created_at: string;
+  name: string;
+  role: string;
+  home_area: string | null;
+  sport: Sport | null;
 };
 
-export type SquadMatchPost = {
+export type SquadCompetitionPost = {
   id: string;
   squad_id: string;
   squad_name: string;
-  sport: Sport | null;
-  home_area: string | null;
-  title: string;
-  notes: string;
-  preferred_time: string | null;
-  game_id: string | null;
+  squad_home_area: string | null;
+  squad_sport: Sport | null;
   created_by: string;
   created_by_username: string | null;
+  title: string;
+  notes: string;
+  preferred_time: string;
   status: 'open' | 'matched' | 'closed';
+  game_id: string | null;
   created_at: string;
+  is_mine?: boolean;
 };
 
-export type SquadChallengeRecord = {
+export type SquadCompetitionChallenge = {
   id: string;
   challenger_squad_id: string;
   challenger_squad_name: string;
@@ -256,10 +250,37 @@ export type SquadChallengeRecord = {
   challenged_squad_name: string;
   created_by: string;
   created_by_username: string | null;
-  status: 'pending' | 'accepted' | 'declined' | 'cancelled' | 'completed';
   message: string;
   proposed_game_id: string | null;
-  proposed_game_title: string | null;
+  status: 'pending' | 'accepted' | 'declined' | 'cancelled' | 'completed';
+  created_at: string;
+  responded_at: string | null;
+};
+
+export type SquadCompetitionResult = {
+  id: string;
+  squad_a_id: string;
+  squad_a_name: string;
+  squad_b_id: string;
+  squad_b_name: string;
+  winner_squad_id: string;
+  loser_squad_id: string;
+  points_awarded: number;
+  notes: string | null;
+  recorded_at: string;
+};
+
+export type SquadGameInviteRow = {
+  id: string;
+  squad_id: string;
+  squad_name: string;
+  game_id: string;
+  game_title: string;
+  game_sport: Sport | null;
+  invited_by: string;
+  invited_by_username: string | null;
+  message: string;
+  status: 'pending' | 'accepted' | 'declined' | 'revoked';
   created_at: string;
   responded_at: string | null;
 };
@@ -1628,197 +1649,332 @@ export async function unbanSquadUser(args: { squadId: string; userId: string; ac
 }
 
 
-export async function fetchMySquadGameInvites(userId: string): Promise<SquadGameInviteRecord[]> {
+export async function fetchLeaderSquads(userId: string): Promise<SquadLeaderSquadOption[]> {
   const { data, error } = await supabase
-    .from('squad_game_invites')
-    .select('id, squad_id, game_id, invited_user_id, invited_by, message, status, created_at, squads:squads!squad_game_invites_squad_id_fkey(name), inviter:profiles!squad_game_invites_invited_by_fkey(username), games:games!squad_game_invites_game_id_fkey(title)')
-    .eq('invited_user_id', userId)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false });
+    .from('squad_members')
+    .select('squad_id, role, squads(id, name, home_area, sport)')
+    .eq('user_id', userId)
+    .in('role', ['owner', 'captain', 'officer']);
   if (error) throw error;
-  return ((data ?? []) as any[]).map((row) => ({
-    id: row.id,
+  return (data ?? []).map((row: any) => ({
     squad_id: row.squad_id,
-    squad_name: row.squads?.name ?? 'Squad',
-    game_id: row.game_id,
-    game_title: row.games?.title ?? 'Game invite',
-    invited_user_id: row.invited_user_id,
-    invited_by: row.invited_by,
-    invited_by_username: row.inviter?.username ?? null,
-    message: row.message ?? '',
-    status: row.status,
-    created_at: row.created_at,
-  }));
-}
-
-export async function sendGameInviteToSquad(args: { gameId: string; squadId: string; invitedBy: string; message?: string }): Promise<number> {
-  const [context, game, members] = await Promise.all([
-    fetchActorContext(args.squadId, args.invitedBy),
-    fetchGameById(args.gameId),
-    fetchSquadMembers(args.squadId),
-  ]);
-  if (!context.permissions.canManageEvents && !context.permissions.canInvitePlayers) throw new Error('You do not have permission to invite your squad to games.');
-  if (game.hostId !== args.invitedBy) throw new Error('Only the game host can invite an entire squad.');
-  const recipients = members.filter((m) => m.user_id !== args.invitedBy);
-  if (recipients.length === 0) return 0;
-  const rows = recipients.map((member) => ({
-    squad_id: args.squadId,
-    game_id: args.gameId,
-    invited_user_id: member.user_id,
-    invited_by: args.invitedBy,
-    message: args.message?.trim() || null,
-    status: 'pending',
-  }));
-  const { error } = await supabase.from('squad_game_invites').upsert(rows, { onConflict: 'squad_id,game_id,invited_user_id' });
-  if (error) throw error;
-  await Promise.all(recipients.map((member) => createNotification({
-    userId: member.user_id,
-    type: 'squad_game_invite',
-    relatedGameId: args.gameId,
-    relatedUserId: args.invitedBy,
-    message: `${context.squad.name} invited you to ${game.title}`,
-  }).catch(() => undefined)));
-  await logSquadAudit({ squadId: args.squadId, action: 'squad_game_invites_sent', metadata: { game_id: args.gameId, recipient_count: recipients.length } });
-  return recipients.length;
-}
-
-export async function respondToSquadGameInvite(args: { inviteId: string; userId: string; accept: boolean }): Promise<void> {
-  const { data, error } = await supabase
-    .from('squad_game_invites')
-    .select('id, game_id, invited_user_id')
-    .eq('id', args.inviteId)
-    .single();
-  if (error) throw error;
-  if ((data as any).invited_user_id !== args.userId) throw new Error('That invite is not for you.');
-  if (args.accept) {
-    const game = await fetchGameById((data as any).game_id);
-    await joinGame(game.id, args.userId, game.isPrivate);
-  }
-  const { error: updateError } = await supabase
-    .from('squad_game_invites')
-    .update({ status: args.accept ? 'accepted' : 'declined', responded_at: new Date().toISOString() })
-    .eq('id', args.inviteId);
-  if (updateError) throw updateError;
-}
-
-export async function fetchOpenSquadMatchPosts(): Promise<SquadMatchPost[]> {
-  const { data, error } = await supabase
-    .from('squad_match_posts')
-    .select('id, squad_id, title, notes, preferred_time, game_id, created_by, status, created_at, squads:squads!squad_match_posts_squad_id_fkey(name, sport, home_area), creator:profiles!squad_match_posts_created_by_fkey(username)')
-    .eq('status', 'open')
-    .order('created_at', { ascending: false })
-    .limit(30);
-  if (error) throw error;
-  return ((data ?? []) as any[]).map((row) => ({
-    id: row.id,
-    squad_id: row.squad_id,
-    squad_name: row.squads?.name ?? 'Squad',
-    sport: row.squads?.sport ?? null,
+    role: row.role ?? 'member',
+    name: row.squads?.name ?? 'Squad',
     home_area: row.squads?.home_area ?? null,
+    sport: row.squads?.sport ?? null,
+  }));
+}
+
+export async function fetchOpenSquadMatchPosts(userId?: string): Promise<SquadCompetitionPost[]> {
+  const [postsRes, memberRes] = await Promise.all([
+    supabase
+      .from('squad_match_posts')
+      .select('id, squad_id, title, notes, preferred_time, game_id, created_by, status, created_at')
+      .order('created_at', { ascending: false })
+      .limit(40),
+    userId
+      ? supabase.from('squad_members').select('squad_id').eq('user_id', userId)
+      : Promise.resolve({ data: [], error: null } as any),
+  ]);
+  if (postsRes.error) throw postsRes.error;
+  const posts = (postsRes.data ?? []) as any[];
+  const squadIds = [...new Set(posts.map((row) => row.squad_id).filter(Boolean))];
+  const userSquadSet = new Set(((memberRes as any).data ?? []).map((row: any) => row.squad_id as string));
+  let squadMap = new Map<string, any>();
+  let userMap = new Map<string, string | null>();
+  if (squadIds.length > 0) {
+    const { data: squads } = await supabase.from('squads').select('id, name, home_area, sport').in('id', squadIds);
+    squadMap = new Map((squads ?? []).map((row: any) => [row.id as string, row]));
+  }
+  const creatorIds = [...new Set(posts.map((row) => row.created_by).filter(Boolean))];
+  if (creatorIds.length > 0) {
+    const { data: profiles } = await supabase.from('profiles').select('id, username').in('id', creatorIds);
+    userMap = new Map((profiles ?? []).map((row: any) => [row.id as string, row.username ?? null]));
+  }
+  return posts.map((row) => ({
+    id: row.id,
+    squad_id: row.squad_id,
+    squad_name: squadMap.get(row.squad_id)?.name ?? 'Squad',
+    squad_home_area: squadMap.get(row.squad_id)?.home_area ?? null,
+    squad_sport: squadMap.get(row.squad_id)?.sport ?? null,
+    created_by: row.created_by,
+    created_by_username: userMap.get(row.created_by) ?? null,
     title: row.title,
     notes: row.notes ?? '',
-    preferred_time: row.preferred_time ?? null,
+    preferred_time: row.preferred_time ?? '',
+    status: row.status ?? 'open',
     game_id: row.game_id ?? null,
-    created_by: row.created_by,
-    created_by_username: row.creator?.username ?? null,
-    status: row.status,
     created_at: row.created_at,
+    is_mine: userSquadSet.has(row.squad_id),
   }));
 }
 
-export async function createSquadMatchPost(args: { squadId: string; createdBy: string; title: string; notes?: string; preferredTime?: string | null; gameId?: string | null }): Promise<void> {
-  const context = await fetchActorContext(args.squadId, args.createdBy);
-  if (!context.permissions.canManageEvents) throw new Error('Only squad leadership can post squad games.');
+export async function createSquadMatchPost(args: {
+  squadId: string;
+  actorUserId: string;
+  title: string;
+  preferredTime?: string;
+  notes?: string;
+  gameId?: string | null;
+}): Promise<void> {
+  const context = await fetchActorContext(args.squadId, args.actorUserId);
+  if (!(context.isOwner || context.role === 'captain' || context.role === 'officer')) throw new Error('You do not have permission to post squad match requests.');
+  const title = args.title.trim();
+  if (!title) throw new Error('Title is required.');
   const { error } = await supabase.from('squad_match_posts').insert({
     squad_id: args.squadId,
-    title: args.title.trim(),
+    title,
     notes: args.notes?.trim() || null,
-    preferred_time: args.preferredTime || null,
-    game_id: args.gameId || null,
-    created_by: args.createdBy,
+    preferred_time: args.preferredTime?.trim() || null,
+    game_id: args.gameId ?? null,
+    created_by: args.actorUserId,
     status: 'open',
   });
   if (error) throw error;
-  await supabase.from('squad_feed_events').insert({ squad_id: args.squadId, event_type: 'match', title: 'Squad challenge posted', body: args.title.trim(), actor_user_id: args.createdBy });
+  await supabase.from('squad_feed_events').insert({
+    squad_id: args.squadId,
+    event_type: 'match',
+    title: 'Looking for a matchup',
+    body: title,
+    actor_user_id: args.actorUserId,
+  });
+  await logSquadAudit({ squadId: args.squadId, action: 'squad_match_post_created', metadata: { title } });
 }
 
-export async function fetchSquadChallengesForSquads(squadIds: string[]): Promise<SquadChallengeRecord[]> {
+export async function closeSquadMatchPost(args: { postId: string; squadId: string; actorUserId: string }): Promise<void> {
+  const context = await fetchActorContext(args.squadId, args.actorUserId);
+  if (!(context.isOwner || context.role === 'captain' || context.role === 'officer')) throw new Error('You do not have permission to manage squad match posts.');
+  const { error } = await supabase.from('squad_match_posts').update({ status: 'closed' }).eq('id', args.postId).eq('squad_id', args.squadId);
+  if (error) throw error;
+  await logSquadAudit({ squadId: args.squadId, action: 'squad_match_post_closed', metadata: { post_id: args.postId } });
+}
+
+export async function createSquadChallenge(args: { postId: string; challengerSquadId: string; actorUserId: string; message?: string }): Promise<void> {
+  const context = await fetchActorContext(args.challengerSquadId, args.actorUserId);
+  if (!(context.isOwner || context.role === 'captain' || context.role === 'officer')) throw new Error('You do not have permission to challenge other squads.');
+  const { data: post, error: postError } = await supabase.from('squad_match_posts').select('id, squad_id, status, game_id').eq('id', args.postId).single();
+  if (postError) throw postError;
+  if (post.status !== 'open') throw new Error('That squad game post is no longer open.');
+  if (post.squad_id === args.challengerSquadId) throw new Error('You cannot challenge your own squad post.');
+  const { data: existing } = await supabase
+    .from('squad_challenges')
+    .select('id')
+    .eq('challenger_squad_id', args.challengerSquadId)
+    .eq('challenged_squad_id', post.squad_id)
+    .eq('status', 'pending')
+    .maybeSingle();
+  if (existing) throw new Error('You already sent this squad a pending challenge.');
+  const { error } = await supabase.from('squad_challenges').insert({
+    challenger_squad_id: args.challengerSquadId,
+    challenged_squad_id: post.squad_id,
+    created_by: args.actorUserId,
+    message: args.message?.trim() || null,
+    proposed_game_id: post.game_id ?? null,
+    status: 'pending',
+  });
+  if (error) throw error;
+  await supabase.from('squad_match_posts').update({ status: 'matched' }).eq('id', args.postId);
+  await logSquadAudit({ squadId: args.challengerSquadId, action: 'squad_challenge_sent', metadata: { post_id: args.postId, challenged_squad_id: post.squad_id } });
+}
+
+export async function fetchMySquadChallenges(userId: string): Promise<SquadCompetitionChallenge[]> {
+  const leaderSquads = await fetchLeaderSquads(userId);
+  const squadIds = leaderSquads.map((row) => row.squad_id);
   if (squadIds.length === 0) return [];
   const { data, error } = await supabase
     .from('squad_challenges')
-    .select('id, challenger_squad_id, challenged_squad_id, created_by, status, message, proposed_game_id, created_at, responded_at, challenger:squads!squad_challenges_challenger_squad_id_fkey(name), challenged:squads!squad_challenges_challenged_squad_id_fkey(name), creator:profiles!squad_challenges_created_by_fkey(username), game:games!squad_challenges_proposed_game_id_fkey(title)')
+    .select('id, challenger_squad_id, challenged_squad_id, created_by, message, proposed_game_id, status, created_at, responded_at')
     .or(`challenger_squad_id.in.(${squadIds.join(',')}),challenged_squad_id.in.(${squadIds.join(',')})`)
     .order('created_at', { ascending: false })
     .limit(40);
   if (error) throw error;
-  return ((data ?? []) as any[]).map((row) => ({
+  const rows = (data ?? []) as any[];
+  const involvedSquadIds = [...new Set(rows.flatMap((row) => [row.challenger_squad_id, row.challenged_squad_id]).filter(Boolean))];
+  const profileIds = [...new Set(rows.map((row) => row.created_by).filter(Boolean))];
+  let squadMap = new Map<string, string>();
+  let userMap = new Map<string, string | null>();
+  if (involvedSquadIds.length > 0) {
+    const { data: squads } = await supabase.from('squads').select('id, name').in('id', involvedSquadIds);
+    squadMap = new Map((squads ?? []).map((row: any) => [row.id as string, row.name as string]));
+  }
+  if (profileIds.length > 0) {
+    const { data: users } = await supabase.from('profiles').select('id, username').in('id', profileIds);
+    userMap = new Map((users ?? []).map((row: any) => [row.id as string, row.username ?? null]));
+  }
+  return rows.map((row) => ({
     id: row.id,
     challenger_squad_id: row.challenger_squad_id,
-    challenger_squad_name: row.challenger?.name ?? 'Challenger',
+    challenger_squad_name: squadMap.get(row.challenger_squad_id) ?? 'Squad',
     challenged_squad_id: row.challenged_squad_id,
-    challenged_squad_name: row.challenged?.name ?? 'Challenged squad',
+    challenged_squad_name: squadMap.get(row.challenged_squad_id) ?? 'Squad',
     created_by: row.created_by,
-    created_by_username: row.creator?.username ?? null,
-    status: row.status,
+    created_by_username: userMap.get(row.created_by) ?? null,
     message: row.message ?? '',
     proposed_game_id: row.proposed_game_id ?? null,
-    proposed_game_title: row.game?.title ?? null,
+    status: row.status ?? 'pending',
     created_at: row.created_at,
     responded_at: row.responded_at ?? null,
   }));
 }
 
-export async function createSquadChallenge(args: { challengerSquadId: string; challengedSquadId: string; createdBy: string; message?: string; proposedGameId?: string | null }): Promise<void> {
-  if (args.challengerSquadId === args.challengedSquadId) throw new Error('Choose a different squad to challenge.');
-  const [context, challenged] = await Promise.all([
-    fetchActorContext(args.challengerSquadId, args.createdBy),
-    fetchSquadById(args.challengedSquadId),
-  ]);
-  if (!context.permissions.canManageEvents) throw new Error('Only squad leadership can send squad challenges.');
-  const { error } = await supabase.from('squad_challenges').insert({
-    challenger_squad_id: args.challengerSquadId,
-    challenged_squad_id: args.challengedSquadId,
-    created_by: args.createdBy,
-    message: args.message?.trim() || null,
-    proposed_game_id: args.proposedGameId || null,
-    status: 'pending',
-  });
+export async function respondToSquadChallenge(args: {
+  challengeId: string;
+  squadId: string;
+  actorUserId: string;
+  accept: boolean;
+}): Promise<void> {
+  const context = await fetchActorContext(args.squadId, args.actorUserId);
+  if (!(context.isOwner || context.role === 'captain' || context.role === 'officer')) throw new Error('You do not have permission to respond to squad challenges.');
+  const { data: challenge, error: challengeError } = await supabase.from('squad_challenges').select('*').eq('id', args.challengeId).single();
+  if (challengeError) throw challengeError;
+  if (challenge.challenged_squad_id !== args.squadId && challenge.challenger_squad_id !== args.squadId) throw new Error('This challenge is not for your squad.');
+  const nextStatus = args.accept ? 'accepted' : 'declined';
+  const { error } = await supabase.from('squad_challenges').update({ status: nextStatus, responded_at: new Date().toISOString() }).eq('id', args.challengeId);
   if (error) throw error;
-  if (challenged.owner_id) {
-    await createNotification({ userId: challenged.owner_id, type: 'squad_challenge', relatedUserId: args.createdBy, relatedGameId: args.proposedGameId ?? undefined, message: `${context.squad.name} challenged your squad.` }).catch(() => undefined);
-  }
-  await supabase.from('squad_feed_events').insert({ squad_id: args.challengerSquadId, event_type: 'rivalry', title: 'Challenge sent', body: args.message?.trim() || `Challenge sent to ${challenged.name}`, actor_user_id: args.createdBy });
+  await logSquadAudit({ squadId: args.squadId, action: args.accept ? 'squad_challenge_accepted' : 'squad_challenge_declined', metadata: { challenge_id: args.challengeId } });
 }
 
-export async function respondToSquadChallenge(args: { challengeId: string; actorUserId: string; accept: boolean }): Promise<void> {
-  const { data, error } = await supabase.from('squad_challenges').select('id, challenger_squad_id, challenged_squad_id').eq('id', args.challengeId).single();
-  if (error) throw error;
-  const challenge = data as any;
-  const context = await fetchActorContext(challenge.challenged_squad_id, args.actorUserId);
-  if (!context.permissions.canManageEvents) throw new Error('Only squad leadership can respond to challenges.');
-  const { error: updateError } = await supabase.from('squad_challenges').update({ status: args.accept ? 'accepted' : 'declined', responded_at: new Date().toISOString() }).eq('id', args.challengeId);
-  if (updateError) throw updateError;
-}
-
-export async function recordSquadMatchResult(args: { squadAId: string; squadBId: string; winnerSquadId: string; loserSquadId: string; pointsAwarded?: number; recordedBy: string; notes?: string; challengeId?: string | null }): Promise<void> {
-  const context = await fetchActorContext(args.winnerSquadId, args.recordedBy).catch(() => fetchActorContext(args.loserSquadId, args.recordedBy));
-  if (!context.permissions.canManageEvents) throw new Error('Only squad leadership can record squad matches.');
-  const pointsAwarded = Math.max(1, Number(args.pointsAwarded ?? 10));
-  const { data, error } = await supabase.from('squad_match_results').insert({
+export async function recordSquadMatchResult(args: {
+  challengeId?: string | null;
+  squadAId: string;
+  squadBId: string;
+  winnerSquadId: string;
+  actorUserId: string;
+  pointsAwarded?: number;
+  notes?: string;
+}): Promise<void> {
+  const loserSquadId = args.winnerSquadId === args.squadAId ? args.squadBId : args.squadAId;
+  const winnerContext = await fetchActorContext(args.winnerSquadId, args.actorUserId).catch(() => null);
+  const loserContext = await fetchActorContext(loserSquadId, args.actorUserId).catch(() => null);
+  const canRecord = [winnerContext, loserContext].some((ctx) => ctx && (ctx.isOwner || ctx.role === 'captain' || ctx.role === 'officer'));
+  if (!canRecord) throw new Error('You do not have permission to record that result.');
+  const pointsAwarded = Math.max(1, Math.floor(args.pointsAwarded ?? 10));
+  const { data: inserted, error } = await supabase.from('squad_match_results').insert({
     squad_a_id: args.squadAId,
     squad_b_id: args.squadBId,
     winner_squad_id: args.winnerSquadId,
-    loser_squad_id: args.loserSquadId,
+    loser_squad_id: loserSquadId,
     points_awarded: pointsAwarded,
-    recorded_by: args.recordedBy,
+    recorded_by: args.actorUserId,
     notes: args.notes?.trim() || null,
   }).select('id').single();
   if (error) throw error;
-  const matchId = (data as any).id;
-  const [winner, loser] = await Promise.all([fetchSquadById(args.winnerSquadId), fetchSquadById(args.loserSquadId)]);
-  await supabase.from('squads').update({ wins: Number(winner.wins ?? 0) + 1, points: Number(winner.points ?? 0) + pointsAwarded, rating: Number(winner.rating ?? 1000) + 15 }).eq('id', args.winnerSquadId);
-  await supabase.from('squads').update({ losses: Number(loser.losses ?? 0) + 1, rating: Math.max(700, Number(loser.rating ?? 1000) - 10) }).eq('id', args.loserSquadId);
-  await supabase.from('squad_point_events').insert([{ squad_id: args.winnerSquadId, event_type: 'match_win', points: pointsAwarded, related_match_id: matchId, metadata: { opponent_squad_id: args.loserSquadId } }, { squad_id: args.loserSquadId, event_type: 'match_played', points: 1, related_match_id: matchId, metadata: { opponent_squad_id: args.winnerSquadId } }]);
-  await supabase.from('squad_feed_events').insert([{ squad_id: args.winnerSquadId, event_type: 'match', title: 'Squad victory', body: args.notes?.trim() || `Won ${pointsAwarded} points in squad play.`, actor_user_id: args.recordedBy }, { squad_id: args.loserSquadId, event_type: 'match', title: 'Squad result posted', body: args.notes?.trim() || 'A squad match was recorded.', actor_user_id: args.recordedBy }]);
-  if (args.challengeId) await supabase.from('squad_challenges').update({ status: 'completed', responded_at: new Date().toISOString() }).eq('id', args.challengeId);
+
+  const { data: squads, error: squadsError } = await supabase.from('squads').select('id, wins, losses, points, rating, name').in('id', [args.squadAId, args.squadBId]);
+  if (squadsError) throw squadsError;
+  const squadMap = new Map((squads ?? []).map((row: any) => [row.id as string, row]));
+  const winner = squadMap.get(args.winnerSquadId);
+  const loser = squadMap.get(loserSquadId);
+  if (winner) {
+    await supabase.from('squads').update({ wins: Number(winner.wins ?? 0) + 1, points: Number(winner.points ?? 0) + pointsAwarded, rating: Number(winner.rating ?? 1000) + 15 }).eq('id', args.winnerSquadId);
+    await supabase.from('squad_point_events').insert({ squad_id: args.winnerSquadId, event_type: 'match_win', points: pointsAwarded, related_match_id: inserted.id, metadata: { opponent_squad_id: loserSquadId } });
+    await supabase.from('squad_feed_events').insert({ squad_id: args.winnerSquadId, event_type: 'match', title: 'Squad win recorded', body: `Beat ${loser?.name ?? 'opponent squad'}`, actor_user_id: args.actorUserId, metadata: { related_match_id: inserted.id } });
+  }
+  if (loser) {
+    await supabase.from('squads').update({ losses: Number(loser.losses ?? 0) + 1, rating: Math.max(700, Number(loser.rating ?? 1000) - 10) }).eq('id', loserSquadId);
+    await supabase.from('squad_feed_events').insert({ squad_id: loserSquadId, event_type: 'match', title: 'Match result posted', body: `Lost to ${winner?.name ?? 'another squad'}`, actor_user_id: args.actorUserId, metadata: { related_match_id: inserted.id } });
+  }
+  await supabase.from('squad_rivalries').upsert([
+    { squad_id: args.squadAId, rival_squad_id: args.squadBId, status: 'active' },
+    { squad_id: args.squadBId, rival_squad_id: args.squadAId, status: 'active' },
+  ], { onConflict: 'squad_id,rival_squad_id' }).catch(() => undefined);
+  if (args.challengeId) {
+    await supabase.from('squad_challenges').update({ status: 'completed', responded_at: new Date().toISOString() }).eq('id', args.challengeId);
+  }
+  await logSquadAudit({ squadId: args.winnerSquadId, action: 'squad_match_recorded', metadata: { match_id: inserted.id, opponent_squad_id: loserSquadId } });
+}
+
+export async function fetchRecentSquadResults(): Promise<SquadCompetitionResult[]> {
+  const { data, error } = await supabase
+    .from('squad_match_results')
+    .select('id, squad_a_id, squad_b_id, winner_squad_id, loser_squad_id, points_awarded, notes, recorded_at')
+    .order('recorded_at', { ascending: false })
+    .limit(20);
+  if (error) throw error;
+  const rows = (data ?? []) as any[];
+  const squadIds = [...new Set(rows.flatMap((row) => [row.squad_a_id, row.squad_b_id]).filter(Boolean))];
+  let squadMap = new Map<string, string>();
+  if (squadIds.length > 0) {
+    const { data: squads } = await supabase.from('squads').select('id, name').in('id', squadIds);
+    squadMap = new Map((squads ?? []).map((row: any) => [row.id as string, row.name as string]));
+  }
+  return rows.map((row) => ({
+    id: row.id,
+    squad_a_id: row.squad_a_id,
+    squad_a_name: squadMap.get(row.squad_a_id) ?? 'Squad A',
+    squad_b_id: row.squad_b_id,
+    squad_b_name: squadMap.get(row.squad_b_id) ?? 'Squad B',
+    winner_squad_id: row.winner_squad_id,
+    loser_squad_id: row.loser_squad_id,
+    points_awarded: Number(row.points_awarded ?? 0),
+    notes: row.notes ?? null,
+    recorded_at: row.recorded_at,
+  }));
+}
+
+export async function fetchMySquadGameInvites(userId: string): Promise<SquadGameInviteRow[]> {
+  const { data, error } = await supabase
+    .from('squad_game_invites')
+    .select('id, squad_id, game_id, invited_by, message, status, created_at, responded_at, squads(name), inviter:profiles!squad_game_invites_invited_by_fkey(username), games(title, sport)')
+    .eq('invited_user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(40);
+  if (error) throw error;
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    squad_id: row.squad_id,
+    squad_name: row.squads?.name ?? 'Squad',
+    game_id: row.game_id,
+    game_title: row.games?.title ?? 'Game',
+    game_sport: row.games?.sport ?? null,
+    invited_by: row.invited_by,
+    invited_by_username: row.inviter?.username ?? null,
+    message: row.message ?? '',
+    status: row.status ?? 'pending',
+    created_at: row.created_at,
+    responded_at: row.responded_at ?? null,
+  }));
+}
+
+export async function respondToSquadGameInvite(args: { inviteId: string; userId: string; accept: boolean }): Promise<void> {
+  const { data: invite, error } = await supabase
+    .from('squad_game_invites')
+    .select('id, squad_id, game_id, invited_user_id, invited_by, status, games(is_private)')
+    .eq('id', args.inviteId)
+    .single();
+  if (error) throw error;
+  if (invite.invited_user_id !== args.userId) throw new Error('That invite is not for you.');
+  if (invite.status !== 'pending') throw new Error('That squad game invite has already been handled.');
+  const nextStatus = args.accept ? 'accepted' : 'declined';
+  const { error: updateError } = await supabase
+    .from('squad_game_invites')
+    .update({ status: nextStatus, responded_at: new Date().toISOString() })
+    .eq('id', args.inviteId);
+  if (updateError) throw updateError;
+  if (args.accept) {
+    await joinGame(invite.game_id, args.userId, Boolean((invite as any).games?.is_private));
+  }
+}
+
+export async function inviteSquadToGame(args: { gameId: string; squadId: string; invitedByUserId: string; message?: string }): Promise<number> {
+  const context = await fetchActorContext(args.squadId, args.invitedByUserId);
+  if (!(context.isOwner || context.role === 'captain' || context.role === 'officer')) throw new Error('You do not have permission to invite this squad to games.');
+  const { data: members, error } = await supabase.from('squad_members').select('user_id').eq('squad_id', args.squadId);
+  if (error) throw error;
+  const inviteRows = (members ?? [])
+    .map((row: any) => row.user_id as string)
+    .filter((userId) => userId && userId !== args.invitedByUserId)
+    .map((userId) => ({
+      squad_id: args.squadId,
+      game_id: args.gameId,
+      invited_user_id: userId,
+      invited_by: args.invitedByUserId,
+      message: args.message?.trim() || null,
+      status: 'pending',
+    }));
+  if (inviteRows.length === 0) return 0;
+  const { error: insertError } = await supabase.from('squad_game_invites').insert(inviteRows);
+  if (insertError) throw insertError;
+  await logSquadAudit({ squadId: args.squadId, action: 'squad_game_invites_sent', metadata: { game_id: args.gameId, invite_count: inviteRows.length } });
+  return inviteRows.length;
 }

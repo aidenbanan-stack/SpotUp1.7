@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, MapPin, Plus, Search, ShieldCheck, Sparkles, Swords, Trophy, Users } from 'lucide-react';
+import { ArrowLeft, CalendarDays, MapPin, Plus, Search, ShieldCheck, Sparkles, Swords, Trophy, Users } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import type { Sport } from '@/types';
 import { SPORTS } from '@/types';
@@ -13,13 +13,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import {
+  closeSquadMatchPost,
   createSquad,
   createSquadChallenge,
   createSquadMatchPost,
+  fetchLeaderSquads,
   fetchMyPendingSquadInvites,
+  fetchMySquadChallenges,
+  fetchMySquadGameInvites,
   fetchMySquads,
   fetchOpenSquadMatchPosts,
-  fetchSquadChallengesForSquads,
+  fetchRecentSquadResults,
   joinSquadById,
   recordSquadMatchResult,
   replaceSquadChannels,
@@ -27,12 +31,16 @@ import {
   replaceSquadTags,
   respondSquadInvite,
   respondToSquadChallenge,
+  respondToSquadGameInvite,
   searchSquads,
   submitSquadJoinRequest,
-  type SquadChallengeRecord,
+  type SquadCompetitionChallenge,
+  type SquadCompetitionPost,
+  type SquadCompetitionResult,
   type SquadDiscoverRow,
+  type SquadGameInviteRow,
   type SquadInviteRecord,
-  type SquadMatchPost,
+  type SquadLeaderSquadOption,
   type SquadWithMeta,
   updateSquadProfile,
   upsertSquadSettings,
@@ -51,16 +59,26 @@ export default function Squads() {
   const [loadingMy, setLoadingMy] = useState(true);
   const [loadingDiscover, setLoadingDiscover] = useState(true);
   const [loadingInvites, setLoadingInvites] = useState(true);
+  const [loadingCompetition, setLoadingCompetition] = useState(true);
   const [mySquads, setMySquads] = useState<SquadWithMeta[]>([]);
   const [discoverSquads, setDiscoverSquads] = useState<SquadDiscoverRow[]>([]);
   const [pendingInvites, setPendingInvites] = useState<SquadInviteRecord[]>([]);
-  const [openMatchPosts, setOpenMatchPosts] = useState<SquadMatchPost[]>([]);
-  const [squadChallenges, setSquadChallenges] = useState<SquadChallengeRecord[]>([]);
+  const [leaderSquads, setLeaderSquads] = useState<SquadLeaderSquadOption[]>([]);
+  const [matchPosts, setMatchPosts] = useState<SquadCompetitionPost[]>([]);
+  const [challenges, setChallenges] = useState<SquadCompetitionChallenge[]>([]);
+  const [recentResults, setRecentResults] = useState<SquadCompetitionResult[]>([]);
+  const [gameInvites, setGameInvites] = useState<SquadGameInviteRow[]>([]);
   const [search, setSearch] = useState('');
+  const [competitionSearch, setCompetitionSearch] = useState('');
   const [tab, setTab] = useState<'my' | 'discover' | 'games'>('my');
   const [createOpen, setCreateOpen] = useState(false);
   const [applyOpen, setApplyOpen] = useState(false);
+  const [matchPostOpen, setMatchPostOpen] = useState(false);
+  const [recordResultOpen, setRecordResultOpen] = useState(false);
+  const [challengeOpen, setChallengeOpen] = useState(false);
   const [applyingTo, setApplyingTo] = useState<SquadDiscoverRow | null>(null);
+  const [selectedPost, setSelectedPost] = useState<SquadCompetitionPost | null>(null);
+  const [selectedChallenge, setSelectedChallenge] = useState<SquadCompetitionChallenge | null>(null);
   const [applyMessage, setApplyMessage] = useState('');
   const [newName, setNewName] = useState('');
   const [newSport, setNewSport] = useState<Sport | 'none'>('none');
@@ -84,20 +102,18 @@ export default function Squads() {
   const [busyCreate, setBusyCreate] = useState(false);
   const [busyJoinId, setBusyJoinId] = useState<string | null>(null);
   const [busyInviteId, setBusyInviteId] = useState<string | null>(null);
+  const [busyCompetitionId, setBusyCompetitionId] = useState<string | null>(null);
   const [minJoinXp, setMinJoinXp] = useState('500');
 
-  const [loadingGamesBoard, setLoadingGamesBoard] = useState(true);
-  const [selectedLeadSquadId, setSelectedLeadSquadId] = useState('none');
-  const [postTitle, setPostTitle] = useState('Looking for a squad matchup');
-  const [postNotes, setPostNotes] = useState('Competitive run, show up ready.');
-  const [postPreferredTime, setPostPreferredTime] = useState('This weekend');
-  const [creatingPost, setCreatingPost] = useState(false);
-  const [challengingPostId, setChallengingPostId] = useState<string | null>(null);
-  const [challengeMessage, setChallengeMessage] = useState('We are down to run you this week.');
-  const [recordOpponentSquadId, setRecordOpponentSquadId] = useState('none');
-  const [recordWinnerSquadId, setRecordWinnerSquadId] = useState('none');
-  const [recordNotes, setRecordNotes] = useState('');
-  const [recordingResult, setRecordingResult] = useState(false);
+  const [postSquadId, setPostSquadId] = useState('');
+  const [postTitle, setPostTitle] = useState('');
+  const [postPreferredTime, setPostPreferredTime] = useState('Weeknights after 6 PM');
+  const [postNotes, setPostNotes] = useState('Looking for a reliable local matchup.');
+  const [challengeSquadId, setChallengeSquadId] = useState('');
+  const [challengeMessage, setChallengeMessage] = useState('We can run this week.');
+  const [resultWinnerSquadId, setResultWinnerSquadId] = useState('');
+  const [resultPoints, setResultPoints] = useState('10');
+  const [resultNotes, setResultNotes] = useState('');
 
   const joinUnlocked = (user?.xp ?? 0) >= 500;
   const createUnlocked = (user?.xp ?? 0) >= 500;
@@ -110,18 +126,10 @@ export default function Squads() {
     if (!user?.id) return;
     setLoadingMy(true);
     try {
-      const squads = await fetchMySquads(user.id);
-      setMySquads(squads);
-      const leadSquads = squads.filter((squad) => squad.is_owner);
-      if (leadSquads.length > 0) {
-        setSelectedLeadSquadId((current) => current !== 'none' ? current : leadSquads[0].id);
-      }
-      await refreshGamesBoard(squads);
+      setMySquads(await fetchMySquads(user.id));
     } catch (e) {
       console.error(e);
       setMySquads([]);
-      setOpenMatchPosts([]);
-      setSquadChallenges([]);
     } finally {
       setLoadingMy(false);
     }
@@ -154,26 +162,32 @@ export default function Squads() {
     }
   }
 
-  async function refreshGamesBoard(currentSquads?: SquadWithMeta[]) {
-    setLoadingGamesBoard(true);
+  async function refreshCompetition() {
+    if (!user?.id) return;
+    setLoadingCompetition(true);
     try {
-      const squads = currentSquads ?? mySquads;
-      const leadSquads = squads.filter((squad) => squad.is_owner);
-      if (leadSquads.length > 0) {
-        setSelectedLeadSquadId((current) => current !== 'none' ? current : leadSquads[0].id);
-      }
-      const [posts, challenges] = await Promise.all([
-        fetchOpenSquadMatchPosts().catch(() => []),
-        fetchSquadChallengesForSquads(squads.map((squad) => squad.id)).catch(() => []),
+      const [leaders, posts, loadedChallenges, results, loadedGameInvites] = await Promise.all([
+        fetchLeaderSquads(user.id),
+        fetchOpenSquadMatchPosts(user.id),
+        fetchMySquadChallenges(user.id),
+        fetchRecentSquadResults(),
+        fetchMySquadGameInvites(user.id),
       ]);
-      setOpenMatchPosts(posts);
-      setSquadChallenges(challenges);
+      setLeaderSquads(leaders);
+      setMatchPosts(posts);
+      setChallenges(loadedChallenges);
+      setRecentResults(results);
+      setGameInvites(loadedGameInvites);
+      setPostSquadId((prev) => prev || leaders[0]?.squad_id || '');
     } catch (e) {
       console.error(e);
-      setOpenMatchPosts([]);
-      setSquadChallenges([]);
+      setLeaderSquads([]);
+      setMatchPosts([]);
+      setChallenges([]);
+      setRecentResults([]);
+      setGameInvites([]);
     } finally {
-      setLoadingGamesBoard(false);
+      setLoadingCompetition(false);
     }
   }
 
@@ -181,6 +195,7 @@ export default function Squads() {
     void refreshMySquads();
     void refreshDiscover('');
     void refreshInvites();
+    void refreshCompetition();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
@@ -197,6 +212,23 @@ export default function Squads() {
     const areaIds = new Set(areaSquads.map((s) => s.id));
     return discoverSquads.filter((s) => !areaIds.has(s.id));
   }, [areaSquads, discoverSquads]);
+
+  const filteredMatchPosts = useMemo(() => {
+    const q = competitionSearch.trim().toLowerCase();
+    if (!q) return matchPosts;
+    return matchPosts.filter((post) =>
+      [post.title, post.squad_name, post.notes, post.squad_home_area, post.preferred_time]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q)),
+    );
+  }, [competitionSearch, matchPosts]);
+
+  const openBoardPosts = filteredMatchPosts.filter((post) => post.status === 'open');
+  const myOpenPosts = openBoardPosts.filter((post) => post.is_mine);
+  const challengeablePosts = openBoardPosts.filter((post) => !post.is_mine);
+  const pendingGameInvites = gameInvites.filter((invite) => invite.status === 'pending');
+  const incomingChallenges = challenges.filter((challenge) => leaderSquads.some((squad) => squad.squad_id === challenge.challenged_squad_id) && challenge.status === 'pending');
+  const acceptedChallenges = challenges.filter((challenge) => challenge.status === 'accepted');
 
   async function onCreate() {
     if (!user?.id || busyCreate || !newName.trim()) return;
@@ -272,6 +304,7 @@ export default function Squads() {
       setMinJoinXp('500');
       await refreshMySquads();
       await refreshDiscover('');
+      await refreshCompetition();
       navigate(`/squad/${created.id}`);
     } catch (e: any) {
       console.error(e);
@@ -289,6 +322,7 @@ export default function Squads() {
         await joinSquadById({ squadId: squad.id });
         await refreshMySquads();
         await refreshDiscover(search);
+        await refreshCompetition();
       } catch (e: any) {
         console.error(e);
         alert(e?.message ?? 'Could not join squad.');
@@ -324,65 +358,132 @@ export default function Squads() {
     }
   }
 
+  async function onRespondInvite(inviteId: string, accept: boolean) {
+    if (!user?.id) return;
+    setBusyInviteId(inviteId);
+    try {
+      const joinedSquadId = await respondSquadInvite({ inviteId, userId: user.id, accept });
+      await refreshInvites();
+      await refreshMySquads();
+      await refreshDiscover(search);
+      await refreshCompetition();
+      if (accept) navigate(`/squad/${joinedSquadId}`);
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message ?? 'Could not respond to invite.');
+    } finally {
+      setBusyInviteId(null);
+    }
+  }
 
   async function onCreateMatchPost() {
-    if (!user?.id || selectedLeadSquadId === 'none' || !postTitle.trim()) return;
-    setCreatingPost(true);
+    if (!user?.id || !postSquadId || !postTitle.trim()) return;
+    setBusyCompetitionId('create-post');
     try {
-      await createSquadMatchPost({ squadId: selectedLeadSquadId, createdBy: user.id, title: postTitle, notes: postNotes, preferredTime: postPreferredTime || null });
-      await refreshGamesBoard();
-      alert('Squad game post created. Nearby squads can now challenge you.');
+      await createSquadMatchPost({
+        squadId: postSquadId,
+        actorUserId: user.id,
+        title: postTitle,
+        preferredTime: postPreferredTime,
+        notes: postNotes,
+      });
+      setMatchPostOpen(false);
+      setPostTitle('');
+      setPostNotes('Looking for a reliable local matchup.');
+      setPostPreferredTime('Weeknights after 6 PM');
+      await refreshCompetition();
     } catch (e: any) {
-      console.error(e);
-      alert(e?.message ?? 'Could not post squad game.');
+      alert(e?.message ?? 'Could not create squad game post.');
     } finally {
-      setCreatingPost(false);
+      setBusyCompetitionId(null);
     }
   }
 
-  async function onChallengePost(post: SquadMatchPost) {
-    if (!user?.id || selectedLeadSquadId === 'none') return;
-    setChallengingPostId(post.id);
+  async function onChallengePost() {
+    if (!user?.id || !selectedPost || !challengeSquadId) return;
+    setBusyCompetitionId(selectedPost.id);
     try {
-      await createSquadChallenge({ challengerSquadId: selectedLeadSquadId, challengedSquadId: post.squad_id, createdBy: user.id, message: challengeMessage, proposedGameId: post.game_id });
-      await refreshGamesBoard();
-      alert('Challenge sent. The other squad can now accept or decline it.');
+      await createSquadChallenge({
+        postId: selectedPost.id,
+        challengerSquadId: challengeSquadId,
+        actorUserId: user.id,
+        message: challengeMessage,
+      });
+      setChallengeOpen(false);
+      setSelectedPost(null);
+      setChallengeMessage('We can run this week.');
+      await refreshCompetition();
     } catch (e: any) {
-      console.error(e);
       alert(e?.message ?? 'Could not send challenge.');
     } finally {
-      setChallengingPostId(null);
+      setBusyCompetitionId(null);
     }
   }
 
-  async function onRespondChallenge(challengeId: string, accept: boolean) {
+  async function onRespondChallenge(challengeId: string, squadId: string, accept: boolean) {
     if (!user?.id) return;
+    setBusyCompetitionId(challengeId);
     try {
-      await respondToSquadChallenge({ challengeId, actorUserId: user.id, accept });
-      await refreshGamesBoard();
+      await respondToSquadChallenge({ challengeId, squadId, actorUserId: user.id, accept });
+      await refreshCompetition();
     } catch (e: any) {
-      console.error(e);
-      alert(e?.message ?? 'Could not respond to challenge.');
+      alert(e?.message ?? 'Could not update challenge.');
+    } finally {
+      setBusyCompetitionId(null);
     }
   }
 
   async function onRecordResult() {
-    if (!user?.id || selectedLeadSquadId === 'none' || recordOpponentSquadId === 'none' || recordWinnerSquadId === 'none') return;
-    setRecordingResult(true);
+    if (!user?.id || !selectedChallenge || !resultWinnerSquadId) return;
+    setBusyCompetitionId(selectedChallenge.id);
     try {
-      const winner = recordWinnerSquadId;
-      const loser = winner === selectedLeadSquadId ? recordOpponentSquadId : selectedLeadSquadId;
-      await recordSquadMatchResult({ squadAId: selectedLeadSquadId, squadBId: recordOpponentSquadId, winnerSquadId: winner, loserSquadId: loser, recordedBy: user.id, notes: recordNotes, pointsAwarded: 10 });
-      setRecordNotes('');
+      await recordSquadMatchResult({
+        challengeId: selectedChallenge.id,
+        squadAId: selectedChallenge.challenger_squad_id,
+        squadBId: selectedChallenge.challenged_squad_id,
+        winnerSquadId: resultWinnerSquadId,
+        actorUserId: user.id,
+        pointsAwarded: Number(resultPoints || '10'),
+        notes: resultNotes,
+      });
+      setRecordResultOpen(false);
+      setSelectedChallenge(null);
+      setResultWinnerSquadId('');
+      setResultPoints('10');
+      setResultNotes('');
+      await refreshCompetition();
       await refreshMySquads();
       await refreshDiscover(search);
-      await refreshGamesBoard();
-      alert('Squad result recorded. Ratings, points, and history were updated.');
     } catch (e: any) {
-      console.error(e);
       alert(e?.message ?? 'Could not record squad result.');
     } finally {
-      setRecordingResult(false);
+      setBusyCompetitionId(null);
+    }
+  }
+
+  async function onHandleGameInvite(inviteId: string, accept: boolean) {
+    if (!user?.id) return;
+    setBusyCompetitionId(inviteId);
+    try {
+      await respondToSquadGameInvite({ inviteId, userId: user.id, accept });
+      await refreshCompetition();
+    } catch (e: any) {
+      alert(e?.message ?? 'Could not respond to squad game invite.');
+    } finally {
+      setBusyCompetitionId(null);
+    }
+  }
+
+  async function onClosePost(postId: string, squadId: string) {
+    if (!user?.id) return;
+    setBusyCompetitionId(postId);
+    try {
+      await closeSquadMatchPost({ postId, squadId, actorUserId: user.id });
+      await refreshCompetition();
+    } catch (e: any) {
+      alert(e?.message ?? 'Could not close squad post.');
+    } finally {
+      setBusyCompetitionId(null);
     }
   }
 
@@ -455,7 +556,7 @@ export default function Squads() {
   return (
     <div className="min-h-screen bg-background pb-24">
       <div className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border/60">
-        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
+        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => navigate(-1)}><ArrowLeft className="w-5 h-5" /></Button>
             <div>
@@ -467,8 +568,8 @@ export default function Squads() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto p-4 space-y-4">
-        <div className="grid gap-4 md:grid-cols-3">
+      <div className="max-w-6xl mx-auto p-4 space-y-4">
+        <div className="grid gap-4 md:grid-cols-4">
           <div className="glass-card p-4">
             <div className="text-sm text-muted-foreground">Unlock status</div>
             <div className="text-2xl font-bold mt-1">{user?.xp?.toLocaleString() ?? 0} XP</div>
@@ -482,7 +583,12 @@ export default function Squads() {
           <div className="glass-card p-4">
             <div className="text-sm text-muted-foreground">Pending invites</div>
             <div className="text-2xl font-bold mt-1">{loadingInvites ? '...' : pendingInvites.length}</div>
-            <div className="text-sm mt-2">Captains can now invite you directly into squads.</div>
+            <div className="text-sm mt-2">Captains can invite you directly into squads.</div>
+          </div>
+          <div className="glass-card p-4">
+            <div className="text-sm text-muted-foreground">Squad game invites</div>
+            <div className="text-2xl font-bold mt-1">{loadingCompetition ? '...' : pendingGameInvites.length}</div>
+            <div className="text-sm mt-2">Game invites sent to you through your squads now live here.</div>
           </div>
         </div>
 
@@ -527,7 +633,7 @@ export default function Squads() {
               ) : mySquads.map((squad) => <SquadCard key={squad.id} squad={squad} />)}
             </div>
           </div>
-        ) : (
+        ) : tab === 'discover' ? (
           <div className="space-y-4">
             <div className="glass-card p-4">
               <div className="relative">
@@ -555,6 +661,174 @@ export default function Squads() {
                 ) : otherSquads.map((squad) => <SquadCard key={squad.id} squad={squad} showJoin />)}
               </div>
             </section>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div className="glass-card p-4 lg:col-span-2">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <div className="font-semibold">Squad competition hub</div>
+                    <div className="text-sm text-muted-foreground">Everything for squad game invites, matchup posts, challenges, and competitive results now lives here.</div>
+                  </div>
+                  <Button disabled={leaderSquads.length === 0} onClick={() => setMatchPostOpen(true)} className="gap-2"><Plus className="w-4 h-4" /> Post matchup</Button>
+                </div>
+                <div className="mt-4 relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input value={competitionSearch} onChange={(e) => setCompetitionSearch(e.target.value)} placeholder="Search squad games by squad, area, or matchup note" className="pl-9" />
+                </div>
+              </div>
+              <div className="glass-card p-4">
+                <div className="font-semibold">Your competition status</div>
+                <div className="mt-3 space-y-2 text-sm">
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Leader squads</span><span className="font-semibold">{leaderSquads.length}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Open posts</span><span className="font-semibold">{myOpenPosts.length}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Incoming challenges</span><span className="font-semibold">{incomingChallenges.length}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Pending game invites</span><span className="font-semibold">{pendingGameInvites.length}</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              <section className="glass-card p-4 space-y-3">
+                <div className="flex items-center gap-2 font-semibold"><Users className="w-4 h-4" /> Squad game invites</div>
+                {loadingCompetition ? (
+                  <div className="text-sm text-muted-foreground">Loading squad game invites...</div>
+                ) : pendingGameInvites.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No squad game invites right now.</div>
+                ) : (
+                  pendingGameInvites.map((invite) => (
+                    <div key={invite.id} className="rounded-2xl border p-3 space-y-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold">{invite.game_title}</div>
+                          <div className="text-sm text-muted-foreground">{invite.squad_name} invited you via {invite.invited_by_username ?? 'a squad leader'}</div>
+                        </div>
+                        <span className="text-xs rounded-full bg-secondary px-2 py-1 capitalize">{sportLabel(invite.game_sport ?? null)}</span>
+                      </div>
+                      {invite.message ? <div className="text-sm">“{invite.message}”</div> : null}
+                      <div className="flex gap-2">
+                        <Button variant="secondary" disabled={busyCompetitionId === invite.id} onClick={() => onHandleGameInvite(invite.id, false)}>{busyCompetitionId === invite.id ? 'Working...' : 'Decline'}</Button>
+                        <Button disabled={busyCompetitionId === invite.id} onClick={() => onHandleGameInvite(invite.id, true)}>{busyCompetitionId === invite.id ? 'Working...' : 'Join game'}</Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </section>
+
+              <section className="glass-card p-4 space-y-3">
+                <div className="flex items-center gap-2 font-semibold"><Swords className="w-4 h-4" /> Incoming challenges</div>
+                {loadingCompetition ? (
+                  <div className="text-sm text-muted-foreground">Loading challenges...</div>
+                ) : incomingChallenges.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No pending squad challenges right now.</div>
+                ) : (
+                  incomingChallenges.map((challenge) => (
+                    <div key={challenge.id} className="rounded-2xl border p-3 space-y-2">
+                      <div className="font-semibold">{challenge.challenger_squad_name} challenged {challenge.challenged_squad_name}</div>
+                      <div className="text-sm text-muted-foreground">Sent by {challenge.created_by_username ?? 'a squad leader'}</div>
+                      {challenge.message ? <div className="text-sm">{challenge.message}</div> : null}
+                      <div className="flex gap-2 flex-wrap">
+                        <Button variant="secondary" disabled={busyCompetitionId === challenge.id} onClick={() => onRespondChallenge(challenge.id, challenge.challenged_squad_id, false)}>{busyCompetitionId === challenge.id ? 'Working...' : 'Decline'}</Button>
+                        <Button disabled={busyCompetitionId === challenge.id} onClick={() => onRespondChallenge(challenge.id, challenge.challenged_squad_id, true)}>{busyCompetitionId === challenge.id ? 'Working...' : 'Accept challenge'}</Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </section>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-3">
+              <section className="glass-card p-4 xl:col-span-2 space-y-3">
+                <div className="flex items-center gap-2 font-semibold"><CalendarDays className="w-4 h-4" /> Open squad game board</div>
+                {loadingCompetition ? (
+                  <div className="text-sm text-muted-foreground">Loading squad game board...</div>
+                ) : challengeablePosts.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No open squad game posts yet. Create one to get the board going.</div>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {challengeablePosts.map((post) => (
+                      <div key={post.id} className="rounded-2xl border p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="font-semibold">{post.title}</div>
+                            <div className="text-sm text-muted-foreground">{post.squad_name}{post.squad_home_area ? ` • ${post.squad_home_area}` : ''}</div>
+                          </div>
+                          <span className="text-xs rounded-full bg-secondary px-2 py-1">{sportLabel(post.squad_sport ?? null)}</span>
+                        </div>
+                        {post.preferred_time ? <div className="text-sm"><span className="text-muted-foreground">Preferred time:</span> {post.preferred_time}</div> : null}
+                        {post.notes ? <div className="text-sm text-muted-foreground">{post.notes}</div> : null}
+                        <Button
+                          disabled={leaderSquads.length === 0 || busyCompetitionId === post.id}
+                          onClick={() => {
+                            setSelectedPost(post);
+                            setChallengeSquadId(leaderSquads[0]?.squad_id ?? '');
+                            setChallengeMessage('We can run this week.');
+                            setChallengeOpen(true);
+                          }}
+                        >
+                          {busyCompetitionId === post.id ? 'Working...' : 'Challenge squad'}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="glass-card p-4 space-y-3">
+                <div className="flex items-center gap-2 font-semibold"><Trophy className="w-4 h-4" /> Your squad posts</div>
+                {myOpenPosts.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">You do not have any open matchup posts yet.</div>
+                ) : myOpenPosts.map((post) => (
+                  <div key={post.id} className="rounded-2xl border p-3 space-y-2">
+                    <div className="font-semibold">{post.squad_name}</div>
+                    <div className="text-sm">{post.title}</div>
+                    {post.preferred_time ? <div className="text-xs text-muted-foreground">{post.preferred_time}</div> : null}
+                    <Button variant="secondary" disabled={busyCompetitionId === post.id} onClick={() => onClosePost(post.id, post.squad_id)}>{busyCompetitionId === post.id ? 'Working...' : 'Close post'}</Button>
+                  </div>
+                ))}
+              </section>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              <section className="glass-card p-4 space-y-3">
+                <div className="flex items-center gap-2 font-semibold"><Swords className="w-4 h-4" /> Active accepted matchups</div>
+                {acceptedChallenges.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">Accepted squad challenges will show here so you can record the result afterward.</div>
+                ) : acceptedChallenges.map((challenge) => (
+                  <div key={challenge.id} className="rounded-2xl border p-3 space-y-2">
+                    <div className="font-semibold">{challenge.challenger_squad_name} vs {challenge.challenged_squad_name}</div>
+                    {challenge.message ? <div className="text-sm text-muted-foreground">{challenge.message}</div> : null}
+                    <Button
+                      disabled={busyCompetitionId === challenge.id}
+                      onClick={() => {
+                        setSelectedChallenge(challenge);
+                        setResultWinnerSquadId(challenge.challenger_squad_id);
+                        setResultPoints('10');
+                        setResultNotes('');
+                        setRecordResultOpen(true);
+                      }}
+                    >
+                      {busyCompetitionId === challenge.id ? 'Working...' : 'Record result'}
+                    </Button>
+                  </div>
+                ))}
+              </section>
+
+              <section className="glass-card p-4 space-y-3">
+                <div className="flex items-center gap-2 font-semibold"><Trophy className="w-4 h-4" /> Recent squad results</div>
+                {recentResults.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No squad results recorded yet.</div>
+                ) : recentResults.map((result) => (
+                  <div key={result.id} className="rounded-2xl border p-3">
+                    <div className="font-semibold">{result.squad_a_name} vs {result.squad_b_name}</div>
+                    <div className="text-sm text-muted-foreground">Winner: {result.winner_squad_id === result.squad_a_id ? result.squad_a_name : result.squad_b_name}</div>
+                    <div className="text-xs text-muted-foreground mt-1">+{result.points_awarded} squad points</div>
+                    {result.notes ? <div className="text-sm mt-2">{result.notes}</div> : null}
+                  </div>
+                ))}
+              </section>
+            </div>
           </div>
         )}
       </div>
@@ -607,6 +881,46 @@ export default function Squads() {
             <div className="text-sm text-muted-foreground">This squad requires a join request. Add a short note about why you would be a good fit.</div>
             <Textarea value={applyMessage} onChange={(e) => setApplyMessage(e.target.value)} rows={5} placeholder="Reliable wing, available on weekends, looking for a steady local squad..." />
             <Button disabled={!applyingTo || busyJoinId === applyingTo?.id} onClick={onSubmitApplication}>{busyJoinId === applyingTo?.id ? 'Sending...' : 'Send application'}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={matchPostOpen} onOpenChange={setMatchPostOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Post a squad matchup request</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2"><Label>Squad</Label><Select value={postSquadId} onValueChange={setPostSquadId}><SelectTrigger><SelectValue placeholder="Choose your squad" /></SelectTrigger><SelectContent>{leaderSquads.map((squad) => <SelectItem key={squad.squad_id} value={squad.squad_id}>{squad.name}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-2"><Label>Title</Label><Input value={postTitle} onChange={(e) => setPostTitle(e.target.value)} placeholder="Looking for a 5v5 run this weekend" /></div>
+            <div className="space-y-2"><Label>Preferred time</Label><Input value={postPreferredTime} onChange={(e) => setPostPreferredTime(e.target.value)} placeholder="Saturday morning" /></div>
+            <div className="space-y-2"><Label>Notes</Label><Textarea value={postNotes} onChange={(e) => setPostNotes(e.target.value)} rows={4} placeholder="Share skill range, area, and vibe." /></div>
+            <Button disabled={!postSquadId || !postTitle.trim() || busyCompetitionId === 'create-post'} onClick={onCreateMatchPost}>{busyCompetitionId === 'create-post' ? 'Posting...' : 'Post squad game'}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={challengeOpen} onOpenChange={setChallengeOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Challenge {selectedPost?.squad_name ?? 'this squad'}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2"><Label>Your squad</Label><Select value={challengeSquadId} onValueChange={setChallengeSquadId}><SelectTrigger><SelectValue placeholder="Choose your squad" /></SelectTrigger><SelectContent>{leaderSquads.map((squad) => <SelectItem key={squad.squad_id} value={squad.squad_id}>{squad.name}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-2"><Label>Challenge message</Label><Textarea value={challengeMessage} onChange={(e) => setChallengeMessage(e.target.value)} rows={4} placeholder="We can host this Friday at 7 PM in Irvine." /></div>
+            <Button disabled={!challengeSquadId || !selectedPost || busyCompetitionId === selectedPost?.id} onClick={onChallengePost}>{busyCompetitionId === selectedPost?.id ? 'Sending...' : 'Send challenge'}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={recordResultOpen} onOpenChange={setRecordResultOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Record squad result</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">Choose the winning squad for this completed matchup.</div>
+            <div className="space-y-2"><Label>Winner</Label><Select value={resultWinnerSquadId} onValueChange={setResultWinnerSquadId}><SelectTrigger><SelectValue placeholder="Select winner" /></SelectTrigger><SelectContent>{selectedChallenge ? [
+              <SelectItem key={selectedChallenge.challenger_squad_id} value={selectedChallenge.challenger_squad_id}>{selectedChallenge.challenger_squad_name}</SelectItem>,
+              <SelectItem key={selectedChallenge.challenged_squad_id} value={selectedChallenge.challenged_squad_id}>{selectedChallenge.challenged_squad_name}</SelectItem>,
+            ] : null}</SelectContent></Select></div>
+            <div className="space-y-2"><Label>Points awarded</Label><Input type="number" value={resultPoints} onChange={(e) => setResultPoints(e.target.value)} /></div>
+            <div className="space-y-2"><Label>Notes</Label><Textarea value={resultNotes} onChange={(e) => setResultNotes(e.target.value)} rows={4} placeholder="Close game, first to 21, rematch already agreed on." /></div>
+            <Button disabled={!selectedChallenge || !resultWinnerSquadId || busyCompetitionId === selectedChallenge?.id} onClick={onRecordResult}>{busyCompetitionId === selectedChallenge?.id ? 'Saving...' : 'Record result'}</Button>
           </div>
         </DialogContent>
       </Dialog>

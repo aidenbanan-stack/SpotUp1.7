@@ -176,10 +176,7 @@ export interface Notification {
     | 'game_reminder'
     | 'game_cancelled'
     | 'tournament_invite'
-    | 'tournament_start'
-    | 'squad_game_invite'
-    | 'squad_challenge'
-    | 'squad_challenge_update';
+    | 'tournament_start';
   relatedGameId?: string;
   relatedUserId?: string;
   relatedTournamentId?: string;

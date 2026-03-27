@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/select';
 import { GameCard } from '@/components/GameCard';
 import { XPRoadDialog } from '@/components/XPRoadDialog';
-import { Bell, MapPin, Plus, User, History, MessageCircle, Trophy, Swords, Users } from 'lucide-react';
+import { Bell, MapPin, Plus, User, History, MessageCircle, Trophy } from 'lucide-react';
 import { SPORTS, Sport } from '@/types';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import { fetchMyConversations } from '@/lib/messagesApi';
@@ -21,7 +21,6 @@ import { isConversationUnread } from '@/lib/messageReadState';
 import { getBrowserLocation, milesBetween, type LatLng } from '@/lib/geo';
 import spotupLogo from '@/assets/SpotUpLogo.jpg';
 import { shouldShowGameOnHome } from '@/lib/gameVisibility';
-import { fetchMySquadGameInvites, respondToSquadGameInvite, type SquadGameInviteRecord } from '@/lib/squadsApi';
 
 type SportFilter = Sport | 'all';
 
@@ -33,10 +32,8 @@ export default function Home() {
 
   const [xpOpen, setXpOpen] = useState(false);
   const [selectedSport, setSelectedSport] = useState<SportFilter>('all');
-  const [squadInvites, setSquadInvites] = useState<SquadGameInviteRecord[]>([]);
-  const [squadInvitesLoading, setSquadInvitesLoading] = useState(false);
-  const [respondingInviteId, setRespondingInviteId] = useState<string | null>(null);
 
+  
   const [radiusMiles, setRadiusMiles] = useState<number>(25);
   const [myLoc, setMyLoc] = useState<LatLng | null>(null);
 
@@ -102,45 +99,6 @@ const nowMs = Date.now();
     .sort((a, b) => +new Date(a.dateTime) - +new Date(b.dateTime));
 
   const headerXP = useMemo(() => user?.xp ?? 0, [user?.xp]);
-
-  useEffect(() => {
-    let mounted = true;
-    if (!user?.id) {
-      setSquadInvites([]);
-      return;
-    }
-    const loadSquadInvites = async () => {
-      try {
-        setSquadInvitesLoading(true);
-        const rows = await fetchMySquadGameInvites(user.id);
-        if (mounted) setSquadInvites(rows);
-      } catch {
-        if (mounted) setSquadInvites([]);
-      } finally {
-        if (mounted) setSquadInvitesLoading(false);
-      }
-    };
-    void loadSquadInvites();
-    return () => {
-      mounted = false;
-    };
-  }, [user?.id]);
-
-  const handleRespondSquadInvite = async (inviteId: string, accept: boolean) => {
-    if (!user?.id) return;
-    try {
-      setRespondingInviteId(inviteId);
-      await respondToSquadGameInvite({ inviteId, userId: user.id, accept });
-      setSquadInvites((current) => current.filter((invite) => invite.id !== inviteId));
-      if (accept) {
-        await refreshGames();
-      }
-    } catch {
-      // no-op, keep home stable
-    } finally {
-      setRespondingInviteId(null);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-background pb-24 safe-top">
@@ -245,48 +203,6 @@ const nowMs = Date.now();
               <Plus className="w-4 h-4 mr-2" />
               Host
             </Button>
-          </div>
-        </div>
-
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="glass-card p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Users className="w-4 h-4" />
-              <h2 className="font-semibold">Squad game invites</h2>
-            </div>
-            {squadInvitesLoading ? (
-              <div className="text-sm text-muted-foreground">Loading squad invites...</div>
-            ) : squadInvites.length === 0 ? (
-              <div className="text-sm text-muted-foreground">No squad game invites right now.</div>
-            ) : (
-              <div className="space-y-3">
-                {squadInvites.slice(0, 3).map((invite) => (
-                  <div key={invite.id} className="rounded-2xl border border-border/60 p-3 space-y-2">
-                    <div className="font-medium">{invite.game_title}</div>
-                    <div className="text-sm text-muted-foreground">{invite.squad_name} invited you{invite.invited_by_username ? ` via ${invite.invited_by_username}` : ''}.</div>
-                    {invite.message ? <div className="text-sm">“{invite.message}”</div> : null}
-                    <div className="flex gap-2">
-                      <Button variant="secondary" size="sm" disabled={respondingInviteId === invite.id} onClick={() => handleRespondSquadInvite(invite.id, false)}>
-                        {respondingInviteId === invite.id ? 'Working...' : 'Decline'}
-                      </Button>
-                      <Button size="sm" disabled={respondingInviteId === invite.id} onClick={() => handleRespondSquadInvite(invite.id, true)}>
-                        {respondingInviteId === invite.id ? 'Working...' : 'Join game'}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="glass-card p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Swords className="w-4 h-4" />
-              <h2 className="font-semibold">Squad play</h2>
-            </div>
-            <div className="text-sm text-muted-foreground">Use the Squads page to post that your squad is looking for games, challenge nearby squads, and track competitive results.</div>
-            <Button className="mt-4" variant="secondary" onClick={() => navigate('/squads')}>Open squad games</Button>
           </div>
         </div>
 
