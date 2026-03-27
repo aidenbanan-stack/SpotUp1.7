@@ -14,17 +14,25 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import {
   createSquad,
+  createSquadChallenge,
+  createSquadMatchPost,
   fetchMyPendingSquadInvites,
   fetchMySquads,
+  fetchOpenSquadMatchPosts,
+  fetchSquadChallengesForSquads,
   joinSquadById,
+  recordSquadMatchResult,
   replaceSquadChannels,
   replaceSquadJoinQuestions,
   replaceSquadTags,
   respondSquadInvite,
+  respondToSquadChallenge,
   searchSquads,
   submitSquadJoinRequest,
+  type SquadChallengeRecord,
   type SquadDiscoverRow,
   type SquadInviteRecord,
+  type SquadMatchPost,
   type SquadWithMeta,
   updateSquadProfile,
   upsertSquadSettings,
@@ -46,8 +54,10 @@ export default function Squads() {
   const [mySquads, setMySquads] = useState<SquadWithMeta[]>([]);
   const [discoverSquads, setDiscoverSquads] = useState<SquadDiscoverRow[]>([]);
   const [pendingInvites, setPendingInvites] = useState<SquadInviteRecord[]>([]);
+  const [openMatchPosts, setOpenMatchPosts] = useState<SquadMatchPost[]>([]);
+  const [squadChallenges, setSquadChallenges] = useState<SquadChallengeRecord[]>([]);
   const [search, setSearch] = useState('');
-  const [tab, setTab] = useState<'my' | 'discover'>('my');
+  const [tab, setTab] = useState<'my' | 'discover' | 'games'>('my');
   const [createOpen, setCreateOpen] = useState(false);
   const [applyOpen, setApplyOpen] = useState(false);
   const [applyingTo, setApplyingTo] = useState<SquadDiscoverRow | null>(null);
@@ -76,6 +86,19 @@ export default function Squads() {
   const [busyInviteId, setBusyInviteId] = useState<string | null>(null);
   const [minJoinXp, setMinJoinXp] = useState('500');
 
+  const [loadingGamesBoard, setLoadingGamesBoard] = useState(true);
+  const [selectedLeadSquadId, setSelectedLeadSquadId] = useState('none');
+  const [postTitle, setPostTitle] = useState('Looking for a squad matchup');
+  const [postNotes, setPostNotes] = useState('Competitive run, show up ready.');
+  const [postPreferredTime, setPostPreferredTime] = useState('This weekend');
+  const [creatingPost, setCreatingPost] = useState(false);
+  const [challengingPostId, setChallengingPostId] = useState<string | null>(null);
+  const [challengeMessage, setChallengeMessage] = useState('We are down to run you this week.');
+  const [recordOpponentSquadId, setRecordOpponentSquadId] = useState('none');
+  const [recordWinnerSquadId, setRecordWinnerSquadId] = useState('none');
+  const [recordNotes, setRecordNotes] = useState('');
+  const [recordingResult, setRecordingResult] = useState(false);
+
   const joinUnlocked = (user?.xp ?? 0) >= 500;
   const createUnlocked = (user?.xp ?? 0) >= 500;
   const cityLabel = user?.city?.trim() || 'your area';
@@ -87,10 +110,18 @@ export default function Squads() {
     if (!user?.id) return;
     setLoadingMy(true);
     try {
-      setMySquads(await fetchMySquads(user.id));
+      const squads = await fetchMySquads(user.id);
+      setMySquads(squads);
+      const leadSquads = squads.filter((squad) => squad.is_owner);
+      if (leadSquads.length > 0) {
+        setSelectedLeadSquadId((current) => current !== 'none' ? current : leadSquads[0].id);
+      }
+      await refreshGamesBoard(squads);
     } catch (e) {
       console.error(e);
       setMySquads([]);
+      setOpenMatchPosts([]);
+      setSquadChallenges([]);
     } finally {
       setLoadingMy(false);
     }
@@ -120,6 +151,29 @@ export default function Squads() {
       setPendingInvites([]);
     } finally {
       setLoadingInvites(false);
+    }
+  }
+
+  async function refreshGamesBoard(currentSquads?: SquadWithMeta[]) {
+    setLoadingGamesBoard(true);
+    try {
+      const squads = currentSquads ?? mySquads;
+      const leadSquads = squads.filter((squad) => squad.is_owner);
+      if (leadSquads.length > 0) {
+        setSelectedLeadSquadId((current) => current !== 'none' ? current : leadSquads[0].id);
+      }
+      const [posts, challenges] = await Promise.all([
+        fetchOpenSquadMatchPosts().catch(() => []),
+        fetchSquadChallengesForSquads(squads.map((squad) => squad.id)).catch(() => []),
+      ]);
+      setOpenMatchPosts(posts);
+      setSquadChallenges(challenges);
+    } catch (e) {
+      console.error(e);
+      setOpenMatchPosts([]);
+      setSquadChallenges([]);
+    } finally {
+      setLoadingGamesBoard(false);
     }
   }
 
@@ -270,20 +324,65 @@ export default function Squads() {
     }
   }
 
-  async function onRespondInvite(inviteId: string, accept: boolean) {
-    if (!user?.id) return;
-    setBusyInviteId(inviteId);
+
+  async function onCreateMatchPost() {
+    if (!user?.id || selectedLeadSquadId === 'none' || !postTitle.trim()) return;
+    setCreatingPost(true);
     try {
-      const joinedSquadId = await respondSquadInvite({ inviteId, userId: user.id, accept });
-      await refreshInvites();
-      await refreshMySquads();
-      await refreshDiscover(search);
-      if (accept) navigate(`/squad/${joinedSquadId}`);
+      await createSquadMatchPost({ squadId: selectedLeadSquadId, createdBy: user.id, title: postTitle, notes: postNotes, preferredTime: postPreferredTime || null });
+      await refreshGamesBoard();
+      alert('Squad game post created. Nearby squads can now challenge you.');
     } catch (e: any) {
       console.error(e);
-      alert(e?.message ?? 'Could not respond to invite.');
+      alert(e?.message ?? 'Could not post squad game.');
     } finally {
-      setBusyInviteId(null);
+      setCreatingPost(false);
+    }
+  }
+
+  async function onChallengePost(post: SquadMatchPost) {
+    if (!user?.id || selectedLeadSquadId === 'none') return;
+    setChallengingPostId(post.id);
+    try {
+      await createSquadChallenge({ challengerSquadId: selectedLeadSquadId, challengedSquadId: post.squad_id, createdBy: user.id, message: challengeMessage, proposedGameId: post.game_id });
+      await refreshGamesBoard();
+      alert('Challenge sent. The other squad can now accept or decline it.');
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message ?? 'Could not send challenge.');
+    } finally {
+      setChallengingPostId(null);
+    }
+  }
+
+  async function onRespondChallenge(challengeId: string, accept: boolean) {
+    if (!user?.id) return;
+    try {
+      await respondToSquadChallenge({ challengeId, actorUserId: user.id, accept });
+      await refreshGamesBoard();
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message ?? 'Could not respond to challenge.');
+    }
+  }
+
+  async function onRecordResult() {
+    if (!user?.id || selectedLeadSquadId === 'none' || recordOpponentSquadId === 'none' || recordWinnerSquadId === 'none') return;
+    setRecordingResult(true);
+    try {
+      const winner = recordWinnerSquadId;
+      const loser = winner === selectedLeadSquadId ? recordOpponentSquadId : selectedLeadSquadId;
+      await recordSquadMatchResult({ squadAId: selectedLeadSquadId, squadBId: recordOpponentSquadId, winnerSquadId: winner, loserSquadId: loser, recordedBy: user.id, notes: recordNotes, pointsAwarded: 10 });
+      setRecordNotes('');
+      await refreshMySquads();
+      await refreshDiscover(search);
+      await refreshGamesBoard();
+      alert('Squad result recorded. Ratings, points, and history were updated.');
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message ?? 'Could not record squad result.');
+    } finally {
+      setRecordingResult(false);
     }
   }
 
@@ -390,6 +489,7 @@ export default function Squads() {
         <div className="glass-card p-2 flex gap-2">
           <button className={cn('flex-1 rounded-xl px-3 py-2 text-sm font-medium', tab === 'my' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')} onClick={() => setTab('my')}>My squads</button>
           <button className={cn('flex-1 rounded-xl px-3 py-2 text-sm font-medium', tab === 'discover' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')} onClick={() => setTab('discover')}>Discover</button>
+          <button className={cn('flex-1 rounded-xl px-3 py-2 text-sm font-medium', tab === 'games' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')} onClick={() => setTab('games')}>Squad games</button>
         </div>
 
         {tab === 'my' ? (

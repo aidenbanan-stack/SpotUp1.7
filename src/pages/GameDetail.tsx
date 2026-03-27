@@ -4,7 +4,7 @@ import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { SportIcon, SportBadge } from '@/components/SportIcon';
 import { PlayerLevelBadge } from '@/components/PlayerLevelBadge';
-import { ArrowLeft, Calendar, Clock, Lock, MapPin, Share2, Users } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, Lock, MapPin, Share2, Swords, Users } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { createNotification } from '@/lib/notificationsApi';
@@ -14,6 +14,8 @@ import { fetchProfilesByIds } from '@/lib/profileApi';
 import { fetchMyFriends } from '@/lib/socialApi';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { fetchMySquads, sendGameInviteToSquad, type SquadWithMeta } from '@/lib/squadsApi';
 
 export default function GameDetail() {
   const { id } = useParams();
@@ -28,6 +30,10 @@ export default function GameDetail() {
   const [friends, setFriends] = useState<any[]>([]);
   const [inviteNote, setInviteNote] = useState('');
   const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
+  const [mySquads, setMySquads] = useState<SquadWithMeta[]>([]);
+  const [selectedSquadId, setSelectedSquadId] = useState('none');
+  const [squadInviteNote, setSquadInviteNote] = useState('Pull up for this run.');
+  const [sendingSquadInvite, setSendingSquadInvite] = useState(false);
 
   const game = games.find((g) => g.id === id);
 
@@ -105,6 +111,26 @@ export default function GameDetail() {
       mounted = false;
     };
   }, [inviteOpen, user?.id]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!inviteOpen || !user?.id || !isHost) return;
+    const loadSquads = async () => {
+      try {
+        const squads = await fetchMySquads(user.id);
+        if (!mounted) return;
+        const leadSquads = squads.filter((squad) => squad.is_owner);
+        setMySquads(leadSquads);
+        setSelectedSquadId((current) => current !== 'none' ? current : (leadSquads[0]?.id ?? 'none'));
+      } catch {
+        if (mounted) setMySquads([]);
+      }
+    };
+    void loadSquads();
+    return () => {
+      mounted = false;
+    };
+  }, [inviteOpen, user?.id, isHost]);
 
   const handleApproveRequest = async (targetUserId: string) => {
     try {
@@ -212,18 +238,18 @@ export default function GameDetail() {
     }
   };
 
-  const handleRejectPending = async (pendingUserId: string) => {
-    if (!user || !isHost) return;
+
+  const handleSendSquadInvite = async () => {
+    if (!user || !isHost || selectedSquadId === 'none') return;
     try {
-      setPendingBusy(pendingUserId);
-      const updated = await rejectJoinRequest(game.id, pendingUserId);
-      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
-      toast.success('Request removed.');
+      setSendingSquadInvite(true);
+      const count = await sendGameInviteToSquad({ gameId: game.id, squadId: selectedSquadId, invitedBy: user.id, message: squadInviteNote });
+      toast.success(count > 0 ? `Sent to ${count} squad members.` : 'No eligible squad members to invite.');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to reject request.';
+      const message = err instanceof Error ? err.message : 'Failed to invite squad.';
       toast.error(message);
     } finally {
-      setPendingBusy(null);
+      setSendingSquadInvite(false);
     }
   };
 
@@ -388,6 +414,39 @@ export default function GameDetail() {
                   </div>
                 </div>
               ))}
+            </div>
+          </section>
+        )}
+
+
+        {isHost && (
+          <section className="animate-fade-in" style={{ animationDelay: '190ms' }}>
+            <div className="glass-card p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Swords className="w-4 h-4 text-primary" />
+                <h3 className="font-semibold">Invite one of your squads</h3>
+              </div>
+              <p className="text-sm text-muted-foreground">Invite your squad members to this game so they can join straight from Home.</p>
+              <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                <div className="space-y-3">
+                  <Select value={selectedSquadId} onValueChange={setSelectedSquadId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={mySquads.length ? 'Choose a squad' : 'Open the invite modal to load squads'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {mySquads.length === 0 ? <SelectItem value="none">No captain squads found</SelectItem> : mySquads.map((squad) => (
+                        <SelectItem key={squad.id} value={squad.id}>{squad.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input value={squadInviteNote} onChange={(e) => setSquadInviteNote(e.target.value)} placeholder="Pull up for this run." />
+                </div>
+                <div className="flex items-end">
+                  <Button onClick={handleSendSquadInvite} disabled={sendingSquadInvite || selectedSquadId === 'none'}>
+                    {sendingSquadInvite ? 'Sending...' : 'Invite squad'}
+                  </Button>
+                </div>
+              </div>
             </div>
           </section>
         )}

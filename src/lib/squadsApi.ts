@@ -1,4 +1,6 @@
 import { supabase } from '@/lib/supabaseClient';
+import { createNotification } from '@/lib/notificationsApi';
+import { fetchGameById, joinGame } from '@/lib/gamesApi';
 import type {
   Sport,
   SquadChannel,
@@ -214,6 +216,52 @@ export type SquadEventCard = {
   my_rsvp: SquadEventRsvpStatus | null;
   recurrence_rule: string | null;
   max_attendees: number | null;
+};
+
+export type SquadGameInviteRecord = {
+  id: string;
+  squad_id: string;
+  squad_name: string;
+  game_id: string;
+  game_title: string;
+  invited_user_id: string;
+  invited_by: string;
+  invited_by_username: string | null;
+  message: string;
+  status: 'pending' | 'accepted' | 'declined' | 'revoked';
+  created_at: string;
+};
+
+export type SquadMatchPost = {
+  id: string;
+  squad_id: string;
+  squad_name: string;
+  sport: Sport | null;
+  home_area: string | null;
+  title: string;
+  notes: string;
+  preferred_time: string | null;
+  game_id: string | null;
+  created_by: string;
+  created_by_username: string | null;
+  status: 'open' | 'matched' | 'closed';
+  created_at: string;
+};
+
+export type SquadChallengeRecord = {
+  id: string;
+  challenger_squad_id: string;
+  challenger_squad_name: string;
+  challenged_squad_id: string;
+  challenged_squad_name: string;
+  created_by: string;
+  created_by_username: string | null;
+  status: 'pending' | 'accepted' | 'declined' | 'cancelled' | 'completed';
+  message: string;
+  proposed_game_id: string | null;
+  proposed_game_title: string | null;
+  created_at: string;
+  responded_at: string | null;
 };
 
 function normalizeSquadRow(row: any): SquadRow {
@@ -1577,4 +1625,200 @@ export async function unbanSquadUser(args: { squadId: string; userId: string; ac
   const { error } = await supabase.from('squad_bans').delete().eq('squad_id', args.squadId).eq('user_id', args.userId);
   if (error) throw error;
   await logSquadAudit({ squadId: args.squadId, action: 'member_unbanned', metadata: { actor_user_id: args.actorUserId, target_user_id: args.userId } });
+}
+
+
+export async function fetchMySquadGameInvites(userId: string): Promise<SquadGameInviteRecord[]> {
+  const { data, error } = await supabase
+    .from('squad_game_invites')
+    .select('id, squad_id, game_id, invited_user_id, invited_by, message, status, created_at, squads:squads!squad_game_invites_squad_id_fkey(name), inviter:profiles!squad_game_invites_invited_by_fkey(username), games:games!squad_game_invites_game_id_fkey(title)')
+    .eq('invited_user_id', userId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as any[]).map((row) => ({
+    id: row.id,
+    squad_id: row.squad_id,
+    squad_name: row.squads?.name ?? 'Squad',
+    game_id: row.game_id,
+    game_title: row.games?.title ?? 'Game invite',
+    invited_user_id: row.invited_user_id,
+    invited_by: row.invited_by,
+    invited_by_username: row.inviter?.username ?? null,
+    message: row.message ?? '',
+    status: row.status,
+    created_at: row.created_at,
+  }));
+}
+
+export async function sendGameInviteToSquad(args: { gameId: string; squadId: string; invitedBy: string; message?: string }): Promise<number> {
+  const [context, game, members] = await Promise.all([
+    fetchActorContext(args.squadId, args.invitedBy),
+    fetchGameById(args.gameId),
+    fetchSquadMembers(args.squadId),
+  ]);
+  if (!context.permissions.canManageEvents && !context.permissions.canInvitePlayers) throw new Error('You do not have permission to invite your squad to games.');
+  if (game.hostId !== args.invitedBy) throw new Error('Only the game host can invite an entire squad.');
+  const recipients = members.filter((m) => m.user_id !== args.invitedBy);
+  if (recipients.length === 0) return 0;
+  const rows = recipients.map((member) => ({
+    squad_id: args.squadId,
+    game_id: args.gameId,
+    invited_user_id: member.user_id,
+    invited_by: args.invitedBy,
+    message: args.message?.trim() || null,
+    status: 'pending',
+  }));
+  const { error } = await supabase.from('squad_game_invites').upsert(rows, { onConflict: 'squad_id,game_id,invited_user_id' });
+  if (error) throw error;
+  await Promise.all(recipients.map((member) => createNotification({
+    userId: member.user_id,
+    type: 'squad_game_invite',
+    relatedGameId: args.gameId,
+    relatedUserId: args.invitedBy,
+    message: `${context.squad.name} invited you to ${game.title}`,
+  }).catch(() => undefined)));
+  await logSquadAudit({ squadId: args.squadId, action: 'squad_game_invites_sent', metadata: { game_id: args.gameId, recipient_count: recipients.length } });
+  return recipients.length;
+}
+
+export async function respondToSquadGameInvite(args: { inviteId: string; userId: string; accept: boolean }): Promise<void> {
+  const { data, error } = await supabase
+    .from('squad_game_invites')
+    .select('id, game_id, invited_user_id')
+    .eq('id', args.inviteId)
+    .single();
+  if (error) throw error;
+  if ((data as any).invited_user_id !== args.userId) throw new Error('That invite is not for you.');
+  if (args.accept) {
+    const game = await fetchGameById((data as any).game_id);
+    await joinGame(game.id, args.userId, game.isPrivate);
+  }
+  const { error: updateError } = await supabase
+    .from('squad_game_invites')
+    .update({ status: args.accept ? 'accepted' : 'declined', responded_at: new Date().toISOString() })
+    .eq('id', args.inviteId);
+  if (updateError) throw updateError;
+}
+
+export async function fetchOpenSquadMatchPosts(): Promise<SquadMatchPost[]> {
+  const { data, error } = await supabase
+    .from('squad_match_posts')
+    .select('id, squad_id, title, notes, preferred_time, game_id, created_by, status, created_at, squads:squads!squad_match_posts_squad_id_fkey(name, sport, home_area), creator:profiles!squad_match_posts_created_by_fkey(username)')
+    .eq('status', 'open')
+    .order('created_at', { ascending: false })
+    .limit(30);
+  if (error) throw error;
+  return ((data ?? []) as any[]).map((row) => ({
+    id: row.id,
+    squad_id: row.squad_id,
+    squad_name: row.squads?.name ?? 'Squad',
+    sport: row.squads?.sport ?? null,
+    home_area: row.squads?.home_area ?? null,
+    title: row.title,
+    notes: row.notes ?? '',
+    preferred_time: row.preferred_time ?? null,
+    game_id: row.game_id ?? null,
+    created_by: row.created_by,
+    created_by_username: row.creator?.username ?? null,
+    status: row.status,
+    created_at: row.created_at,
+  }));
+}
+
+export async function createSquadMatchPost(args: { squadId: string; createdBy: string; title: string; notes?: string; preferredTime?: string | null; gameId?: string | null }): Promise<void> {
+  const context = await fetchActorContext(args.squadId, args.createdBy);
+  if (!context.permissions.canManageEvents) throw new Error('Only squad leadership can post squad games.');
+  const { error } = await supabase.from('squad_match_posts').insert({
+    squad_id: args.squadId,
+    title: args.title.trim(),
+    notes: args.notes?.trim() || null,
+    preferred_time: args.preferredTime || null,
+    game_id: args.gameId || null,
+    created_by: args.createdBy,
+    status: 'open',
+  });
+  if (error) throw error;
+  await supabase.from('squad_feed_events').insert({ squad_id: args.squadId, event_type: 'match', title: 'Squad challenge posted', body: args.title.trim(), actor_user_id: args.createdBy });
+}
+
+export async function fetchSquadChallengesForSquads(squadIds: string[]): Promise<SquadChallengeRecord[]> {
+  if (squadIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('squad_challenges')
+    .select('id, challenger_squad_id, challenged_squad_id, created_by, status, message, proposed_game_id, created_at, responded_at, challenger:squads!squad_challenges_challenger_squad_id_fkey(name), challenged:squads!squad_challenges_challenged_squad_id_fkey(name), creator:profiles!squad_challenges_created_by_fkey(username), game:games!squad_challenges_proposed_game_id_fkey(title)')
+    .or(`challenger_squad_id.in.(${squadIds.join(',')}),challenged_squad_id.in.(${squadIds.join(',')})`)
+    .order('created_at', { ascending: false })
+    .limit(40);
+  if (error) throw error;
+  return ((data ?? []) as any[]).map((row) => ({
+    id: row.id,
+    challenger_squad_id: row.challenger_squad_id,
+    challenger_squad_name: row.challenger?.name ?? 'Challenger',
+    challenged_squad_id: row.challenged_squad_id,
+    challenged_squad_name: row.challenged?.name ?? 'Challenged squad',
+    created_by: row.created_by,
+    created_by_username: row.creator?.username ?? null,
+    status: row.status,
+    message: row.message ?? '',
+    proposed_game_id: row.proposed_game_id ?? null,
+    proposed_game_title: row.game?.title ?? null,
+    created_at: row.created_at,
+    responded_at: row.responded_at ?? null,
+  }));
+}
+
+export async function createSquadChallenge(args: { challengerSquadId: string; challengedSquadId: string; createdBy: string; message?: string; proposedGameId?: string | null }): Promise<void> {
+  if (args.challengerSquadId === args.challengedSquadId) throw new Error('Choose a different squad to challenge.');
+  const [context, challenged] = await Promise.all([
+    fetchActorContext(args.challengerSquadId, args.createdBy),
+    fetchSquadById(args.challengedSquadId),
+  ]);
+  if (!context.permissions.canManageEvents) throw new Error('Only squad leadership can send squad challenges.');
+  const { error } = await supabase.from('squad_challenges').insert({
+    challenger_squad_id: args.challengerSquadId,
+    challenged_squad_id: args.challengedSquadId,
+    created_by: args.createdBy,
+    message: args.message?.trim() || null,
+    proposed_game_id: args.proposedGameId || null,
+    status: 'pending',
+  });
+  if (error) throw error;
+  if (challenged.owner_id) {
+    await createNotification({ userId: challenged.owner_id, type: 'squad_challenge', relatedUserId: args.createdBy, relatedGameId: args.proposedGameId ?? undefined, message: `${context.squad.name} challenged your squad.` }).catch(() => undefined);
+  }
+  await supabase.from('squad_feed_events').insert({ squad_id: args.challengerSquadId, event_type: 'rivalry', title: 'Challenge sent', body: args.message?.trim() || `Challenge sent to ${challenged.name}`, actor_user_id: args.createdBy });
+}
+
+export async function respondToSquadChallenge(args: { challengeId: string; actorUserId: string; accept: boolean }): Promise<void> {
+  const { data, error } = await supabase.from('squad_challenges').select('id, challenger_squad_id, challenged_squad_id').eq('id', args.challengeId).single();
+  if (error) throw error;
+  const challenge = data as any;
+  const context = await fetchActorContext(challenge.challenged_squad_id, args.actorUserId);
+  if (!context.permissions.canManageEvents) throw new Error('Only squad leadership can respond to challenges.');
+  const { error: updateError } = await supabase.from('squad_challenges').update({ status: args.accept ? 'accepted' : 'declined', responded_at: new Date().toISOString() }).eq('id', args.challengeId);
+  if (updateError) throw updateError;
+}
+
+export async function recordSquadMatchResult(args: { squadAId: string; squadBId: string; winnerSquadId: string; loserSquadId: string; pointsAwarded?: number; recordedBy: string; notes?: string; challengeId?: string | null }): Promise<void> {
+  const context = await fetchActorContext(args.winnerSquadId, args.recordedBy).catch(() => fetchActorContext(args.loserSquadId, args.recordedBy));
+  if (!context.permissions.canManageEvents) throw new Error('Only squad leadership can record squad matches.');
+  const pointsAwarded = Math.max(1, Number(args.pointsAwarded ?? 10));
+  const { data, error } = await supabase.from('squad_match_results').insert({
+    squad_a_id: args.squadAId,
+    squad_b_id: args.squadBId,
+    winner_squad_id: args.winnerSquadId,
+    loser_squad_id: args.loserSquadId,
+    points_awarded: pointsAwarded,
+    recorded_by: args.recordedBy,
+    notes: args.notes?.trim() || null,
+  }).select('id').single();
+  if (error) throw error;
+  const matchId = (data as any).id;
+  const [winner, loser] = await Promise.all([fetchSquadById(args.winnerSquadId), fetchSquadById(args.loserSquadId)]);
+  await supabase.from('squads').update({ wins: Number(winner.wins ?? 0) + 1, points: Number(winner.points ?? 0) + pointsAwarded, rating: Number(winner.rating ?? 1000) + 15 }).eq('id', args.winnerSquadId);
+  await supabase.from('squads').update({ losses: Number(loser.losses ?? 0) + 1, rating: Math.max(700, Number(loser.rating ?? 1000) - 10) }).eq('id', args.loserSquadId);
+  await supabase.from('squad_point_events').insert([{ squad_id: args.winnerSquadId, event_type: 'match_win', points: pointsAwarded, related_match_id: matchId, metadata: { opponent_squad_id: args.loserSquadId } }, { squad_id: args.loserSquadId, event_type: 'match_played', points: 1, related_match_id: matchId, metadata: { opponent_squad_id: args.winnerSquadId } }]);
+  await supabase.from('squad_feed_events').insert([{ squad_id: args.winnerSquadId, event_type: 'match', title: 'Squad victory', body: args.notes?.trim() || `Won ${pointsAwarded} points in squad play.`, actor_user_id: args.recordedBy }, { squad_id: args.loserSquadId, event_type: 'match', title: 'Squad result posted', body: args.notes?.trim() || 'A squad match was recorded.', actor_user_id: args.recordedBy }]);
+  if (args.challengeId) await supabase.from('squad_challenges').update({ status: 'completed', responded_at: new Date().toISOString() }).eq('id', args.challengeId);
 }
