@@ -3,6 +3,7 @@ import { GoogleMap as GoogleMapComponent, useJsApiLoader, Marker, InfoWindow } f
 import { Game, SPORTS } from '@/types';
 import { Lock } from 'lucide-react';
 import { GOOGLE_MAPS_API_KEY, hasGoogleMapsKey } from '@/lib/env';
+import { GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_LANGUAGE, GOOGLE_MAPS_LOADER_ID, GOOGLE_MAPS_REGION } from '@/lib/googleMaps';
 import { getBrowserLocation, LatLng } from '@/lib/geo';
 
 interface GoogleMapProps {
@@ -70,7 +71,11 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleM
   }
 
   const { isLoaded, loadError } = useJsApiLoader({
+    id: GOOGLE_MAPS_LOADER_ID,
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+    libraries: GOOGLE_MAPS_LIBRARIES,
+    language: GOOGLE_MAPS_LANGUAGE,
+    region: GOOGLE_MAPS_REGION,
   });
 
   const [map, setMap] = useState<google.maps.Map | null>(null);

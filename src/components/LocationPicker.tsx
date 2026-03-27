@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { MapPin, Search, Loader2 } from 'lucide-react';
 import { GOOGLE_MAPS_API_KEY, hasGoogleMapsKey } from '@/lib/env';
+import { GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_LANGUAGE, GOOGLE_MAPS_LOADER_ID, GOOGLE_MAPS_REGION } from '@/lib/googleMaps';
 
 interface LocationPickerProps {
   value: {
@@ -54,8 +55,11 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
   }
 
   const { isLoaded, loadError } = useJsApiLoader({
+    id: GOOGLE_MAPS_LOADER_ID,
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
-    libraries: ['places'],
+    libraries: GOOGLE_MAPS_LIBRARIES,
+    language: GOOGLE_MAPS_LANGUAGE,
+    region: GOOGLE_MAPS_REGION,
   });
 
   const autocomplete = useMemo(() => {
