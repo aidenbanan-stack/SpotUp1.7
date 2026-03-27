@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Bell,
-  CalendarDays,
   Crown,
   MapPin,
   Megaphone,
@@ -701,6 +700,7 @@ export default function SquadDetail() {
 
   const sportMeta = useMemo(() => SPORTS.find((s) => s.id === squad?.sport) ?? null, [squad?.sport]);
   const record = `${Number(squad?.wins ?? 0)}-${Number(squad?.losses ?? 0)}`;
+  const squadXp = Number(squad?.points ?? 0);
   const reliabilityScore = Math.min(100, Math.max(0, Number(squad?.reliability_min ?? 0)));
   const memberCap = Number(squad?.member_limit ?? 10);
   const openSlots = Math.max(0, memberCap - members.length);
@@ -763,16 +763,13 @@ export default function SquadDetail() {
             </div>
             <div className="text-right">
               <div className="text-sm text-muted-foreground">Squad XP</div>
-              <div className="text-3xl font-bold">{totalXp.toLocaleString()}</div>
+              <div className="text-3xl font-bold">{squadXp.toLocaleString()}</div>
               <div className="text-xs text-muted-foreground mt-1">Invite code {squad.invite_code || '—'}</div>
             </div>
           </div>
-
-          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <div className="rounded-xl bg-secondary/40 p-3"><div className="text-muted-foreground inline-flex items-center gap-1"><Users className="w-4 h-4" /> Open slots</div><div className="text-lg font-bold mt-1">{openSlots}</div></div>
-            <div className="rounded-xl bg-secondary/40 p-3"><div className="text-muted-foreground inline-flex items-center gap-1"><Target className="w-4 h-4" /> Chemistry</div><div className="text-lg font-bold mt-1">{chemistryScore}%</div></div>
-            <div className="rounded-xl bg-secondary/40 p-3"><div className="text-muted-foreground inline-flex items-center gap-1"><Bell className="w-4 h-4" /> Reliability</div><div className="text-lg font-bold mt-1">{reliabilityScore}%</div></div>
-            <div className="rounded-xl bg-secondary/40 p-3"><div className="text-muted-foreground inline-flex items-center gap-1"><CalendarDays className="w-4 h-4" /> Weekly goal</div><div className="text-lg font-bold mt-1">{weeklyProgress}/{weeklyGoal}</div></div>
+            <div className="rounded-xl bg-secondary/40 p-3"><div className="text-muted-foreground inline-flex items-center gap-1"><Bell className="w-4 h-4" /> Reliability floor</div><div className="text-lg font-bold mt-1">{reliabilityScore}%</div></div>
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3 flex-wrap">
