@@ -12,7 +12,6 @@ import {
   ShieldCheck,
   Sparkles,
   Swords,
-  Target,
   Trophy,
   Trash2,
   UserPlus,
@@ -24,7 +23,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/components/ui/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -88,9 +86,9 @@ import {
 } from '@/lib/squadsApi';
 
 function formatDate(input?: string | null) {
-  if (!input) return 'TBD';
+  if (!input) return 'Not scheduled';
   const date = new Date(input);
-  if (Number.isNaN(+date)) return 'TBD';
+  if (Number.isNaN(+date)) return 'Not scheduled';
   return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
@@ -109,15 +107,6 @@ function recurrenceLabel(rule?: string | null) {
   if (rule.includes('FREQ=WEEKLY')) return 'Weekly';
   if (rule.includes('FREQ=MONTHLY')) return 'Monthly';
   return 'Custom repeat';
-}
-
-function getDivisionFromRating(rating: number) {
-  if (rating >= 1650) return 'Dynasty';
-  if (rating >= 1500) return 'Legend';
-  if (rating >= 1350) return 'Elite';
-  if (rating >= 1200) return 'All-Star';
-  if (rating >= 1100) return 'Regular';
-  return 'Rookie';
 }
 
 function clamp(num: number, min: number, max: number) {
@@ -180,7 +169,6 @@ export default function SquadDetail() {
     home_court: '',
     visibility: 'public' as 'public' | 'request' | 'invite_only',
     vibe: 'competitive' as 'casual' | 'competitive' | 'balanced',
-    weekly_goal: '5',
     min_xp_required: '500',
     member_limit: '10',
     primary_color: '#2563eb',
@@ -303,7 +291,6 @@ export default function SquadDetail() {
         home_court: step1.squad.home_court ?? '',
         visibility: (step1.squad.visibility ?? 'public') as 'public' | 'request' | 'invite_only',
         vibe: (step1.squad.vibe ?? 'competitive') as 'casual' | 'competitive' | 'balanced',
-        weekly_goal: String(Number(step1.squad.weekly_goal ?? 5)),
         min_xp_required: String(Number(step1.squad.min_xp_required ?? 500)),
         member_limit: String(Number(step1.squad.member_limit ?? 10)),
         primary_color: step1.squad.primary_color ?? '#2563eb',
@@ -372,8 +359,7 @@ export default function SquadDetail() {
           home_court: profileForm.home_court,
           visibility: profileForm.visibility,
           vibe: profileForm.vibe,
-          weekly_goal: Number(profileForm.weekly_goal || '5'),
-          min_xp_required: Number(profileForm.min_xp_required || '0'),
+              min_xp_required: Number(profileForm.min_xp_required || '0'),
           member_limit: Number(profileForm.member_limit || '10'),
           primary_color: profileForm.primary_color,
           secondary_color: profileForm.secondary_color,
@@ -714,14 +700,8 @@ export default function SquadDetail() {
   }
 
   const sportMeta = useMemo(() => SPORTS.find((s) => s.id === squad?.sport) ?? null, [squad?.sport]);
-  const totalXp = useMemo(() => members.reduce((sum, m) => sum + (m.xp ?? 0), 0), [members]);
   const record = `${Number(squad?.wins ?? 0)}-${Number(squad?.losses ?? 0)}`;
-  const attendanceScore = useMemo(() => clamp(72 + members.length * 3, 0, 100), [members.length]);
-  const chemistryScore = useMemo(() => clamp(60 + Math.round(totalXp / 150), 0, 100), [totalXp]);
-  const reliabilityScore = useMemo(() => clamp(Number(squad?.reliability_min ?? 88) + 4, 0, 100), [squad?.reliability_min]);
-  const division = getDivisionFromRating(Number(squad?.rating ?? 1000));
-  const weeklyGoal = Number(squad?.weekly_goal ?? 5);
-  const weeklyProgress = Math.min(weeklyGoal, Math.max(1, matches.slice(0, 7).length));
+  const reliabilityScore = Math.min(100, Math.max(0, Number(squad?.reliability_min ?? 0)));
   const memberCap = Number(squad?.member_limit ?? 10);
   const openSlots = Math.max(0, memberCap - members.length);
   const sortedMembers = useMemo(() => {
@@ -765,7 +745,6 @@ export default function SquadDetail() {
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="text-2xl font-bold leading-tight">{squad.name}</div>
-                  <Badge variant="secondary">{division}</Badge>
                   <Badge variant="outline">{(squad.vibe ?? 'competitive').replace('_', ' ')}</Badge>
                   <Badge variant="outline" className="capitalize">{(squad.visibility ?? 'public').replace('_', ' ')}</Badge>
                 </div>
@@ -778,7 +757,6 @@ export default function SquadDetail() {
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   {squad.home_area ? <span className="inline-flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {squad.home_area}</span> : null}
-                  <span className="inline-flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5" /> Rtg {Number(squad.rating ?? 1000)}</span>
                   <span className="inline-flex items-center gap-1"><Trophy className="w-3.5 h-3.5" /> {Number(squad.points ?? 0)} pts</span>
                 </div>
               </div>
@@ -798,7 +776,7 @@ export default function SquadDetail() {
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3 flex-wrap">
-            <div className="text-sm max-w-xl text-muted-foreground">{squad.description || 'No description yet. Use the Manage tab to define the squad culture and recruiting standards.'}</div>
+            <div className="text-sm max-w-xl text-muted-foreground">{squad.description || 'Add a squad description in Manage to help people understand your team.'}</div>
             <div className="flex gap-2 flex-wrap">
               {!isMember && squad.visibility !== 'invite_only' ? (
                 <Button onClick={onApplyToJoin} disabled={joining}>{joining ? 'Working...' : squad.visibility === 'public' ? 'Join squad' : 'Send application'}</Button>
@@ -832,20 +810,11 @@ export default function SquadDetail() {
               </CardContent>
             </Card>
             <Card>
-              <CardHeader><CardTitle>Progress</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Competition</CardTitle></CardHeader>
               <CardContent className="space-y-3">
-                <div>
-                  <div className="flex items-center justify-between text-sm"><span className="text-muted-foreground">Weekly squad target</span><span>{weeklyProgress}/{weeklyGoal}</span></div>
-                  <Progress value={(weeklyProgress / Math.max(1, weeklyGoal)) * 100} className="mt-2" />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between text-sm"><span className="text-muted-foreground">Attendance health</span><span>{attendanceScore}%</span></div>
-                  <Progress value={attendanceScore} className="mt-2" />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between text-sm"><span className="text-muted-foreground">Chemistry</span><span>{chemistryScore}%</span></div>
-                  <Progress value={chemistryScore} className="mt-2" />
-                </div>
+                <div className="flex items-center justify-between text-sm"><span className="text-muted-foreground">Record</span><span>{record}</span></div>
+                <div className="flex items-center justify-between text-sm"><span className="text-muted-foreground">Squad points</span><span>{Number(squad.points ?? 0)}</span></div>
+                <div className="flex items-center justify-between text-sm"><span className="text-muted-foreground">Recent match results</span><span>{matches.length}</span></div>
               </CardContent>
             </Card>
           </div>
@@ -1275,7 +1244,6 @@ export default function SquadDetail() {
                   <div className="space-y-2"><Label>Home court</Label><Input value={profileForm.home_court} onChange={(e) => setProfileForm((prev) => ({ ...prev, home_court: e.target.value }))} /></div>
                   <div className="space-y-2"><Label>Visibility</Label><Select value={profileForm.visibility} onValueChange={(value) => setProfileForm((prev) => ({ ...prev, visibility: value as 'public' | 'request' | 'invite_only' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="public">Public</SelectItem><SelectItem value="request">Request to join</SelectItem><SelectItem value="invite_only">Invite only</SelectItem></SelectContent></Select></div>
                   <div className="space-y-2"><Label>Vibe</Label><Select value={profileForm.vibe} onValueChange={(value) => setProfileForm((prev) => ({ ...prev, vibe: value as 'casual' | 'competitive' | 'balanced' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="casual">Casual</SelectItem><SelectItem value="balanced">Balanced</SelectItem><SelectItem value="competitive">Competitive</SelectItem></SelectContent></Select></div>
-                  <div className="space-y-2"><Label>Weekly goal</Label><Input type="number" value={profileForm.weekly_goal} onChange={(e) => setProfileForm((prev) => ({ ...prev, weekly_goal: e.target.value }))} /></div>
                   <div className="space-y-2"><Label>Minimum XP</Label><Input type="number" value={profileForm.min_xp_required} onChange={(e) => setProfileForm((prev) => ({ ...prev, min_xp_required: e.target.value }))} /></div>
                   <div className="space-y-2"><Label>Member limit</Label><Input type="number" value={profileForm.member_limit} onChange={(e) => setProfileForm((prev) => ({ ...prev, member_limit: e.target.value }))} /></div>
                   <div className="space-y-2"><Label>Reliability minimum</Label><Input type="number" value={profileForm.reliability_min} onChange={(e) => setProfileForm((prev) => ({ ...prev, reliability_min: e.target.value }))} /></div>

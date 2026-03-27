@@ -238,6 +238,9 @@ export type SquadCompetitionPost = {
   preferred_time: string;
   status: 'open' | 'matched' | 'closed';
   game_id: string | null;
+  location_name: string | null;
+  location_latitude: number | null;
+  location_longitude: number | null;
   created_at: string;
   is_mine?: boolean;
 };
@@ -682,7 +685,7 @@ export async function fetchSquadEvents(squadId: string, userId?: string | null):
         attendee_count,
         maybe_count,
         not_going_count,
-        location: row.location_name ?? 'TBD',
+        location: row.location_name ?? '',
         notes: row.notes ?? '',
         visibility: row.visibility ?? 'members_only',
         creator_id: row.creator_id ?? null,
@@ -1669,7 +1672,7 @@ export async function fetchOpenSquadMatchPosts(userId?: string): Promise<SquadCo
   const [postsRes, memberRes] = await Promise.all([
     supabase
       .from('squad_match_posts')
-      .select('id, squad_id, title, notes, preferred_time, game_id, created_by, status, created_at')
+      .select('id, squad_id, title, notes, preferred_time, game_id, location_name, location_latitude, location_longitude, created_by, status, created_at')
       .order('created_at', { ascending: false })
       .limit(40),
     userId
@@ -1704,6 +1707,9 @@ export async function fetchOpenSquadMatchPosts(userId?: string): Promise<SquadCo
     preferred_time: row.preferred_time ?? '',
     status: row.status ?? 'open',
     game_id: row.game_id ?? null,
+    location_name: row.location_name ?? null,
+    location_latitude: row.location_latitude != null ? Number(row.location_latitude) : null,
+    location_longitude: row.location_longitude != null ? Number(row.location_longitude) : null,
     created_at: row.created_at,
     is_mine: userSquadSet.has(row.squad_id),
   }));
@@ -1716,6 +1722,9 @@ export async function createSquadMatchPost(args: {
   preferredTime?: string;
   notes?: string;
   gameId?: string | null;
+  locationName?: string | null;
+  locationLatitude?: number | null;
+  locationLongitude?: number | null;
 }): Promise<void> {
   const context = await fetchActorContext(args.squadId, args.actorUserId);
   if (!(context.isOwner || context.role === 'captain' || context.role === 'officer')) throw new Error('You do not have permission to post squad match requests.');
@@ -1727,6 +1736,9 @@ export async function createSquadMatchPost(args: {
     notes: args.notes?.trim() || null,
     preferred_time: args.preferredTime?.trim() || null,
     game_id: args.gameId ?? null,
+    location_name: args.locationName?.trim() || null,
+    location_latitude: typeof args.locationLatitude === 'number' ? args.locationLatitude : null,
+    location_longitude: typeof args.locationLongitude === 'number' ? args.locationLongitude : null,
     created_by: args.actorUserId,
     status: 'open',
   });
@@ -1735,7 +1747,7 @@ export async function createSquadMatchPost(args: {
     squad_id: args.squadId,
     event_type: 'match',
     title: 'Looking for a matchup',
-    body: title,
+    body: [title, args.locationName?.trim()].filter(Boolean).join(' • '),
     actor_user_id: args.actorUserId,
   });
   await logSquadAudit({ squadId: args.squadId, action: 'squad_match_post_created', metadata: { title } });

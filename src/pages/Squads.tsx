@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
+import { LocationPicker } from '@/components/LocationPicker';
 import {
   closeSquadMatchPost,
   createSquad,
@@ -89,8 +90,7 @@ export default function Squads() {
   const [newVisibility, setNewVisibility] = useState<'public' | 'request' | 'invite_only'>('public');
   const [newVibe, setNewVibe] = useState<'casual' | 'competitive' | 'balanced'>('competitive');
   const [newMemberLimit, setNewMemberLimit] = useState('10');
-  const [newWeeklyGoal, setNewWeeklyGoal] = useState('5');
-  const [newReliabilityMin, setNewReliabilityMin] = useState('90');
+    const [newReliabilityMin, setNewReliabilityMin] = useState('90');
   const [newRecruiting, setNewRecruiting] = useState(true);
   const [newMotto, setNewMotto] = useState('');
   const [newTags, setNewTags] = useState('local, active, reliable');
@@ -109,6 +109,7 @@ export default function Squads() {
   const [postTitle, setPostTitle] = useState('');
   const [postPreferredTime, setPostPreferredTime] = useState('Weeknights after 6 PM');
   const [postNotes, setPostNotes] = useState('Looking for a reliable local matchup.');
+  const [postLocation, setPostLocation] = useState({ latitude: 33.6846, longitude: -117.8265, areaName: '' });
   const [challengeSquadId, setChallengeSquadId] = useState('');
   const [challengeMessage, setChallengeMessage] = useState('We can run this week.');
   const [resultWinnerSquadId, setResultWinnerSquadId] = useState('');
@@ -252,7 +253,6 @@ export default function Squads() {
           visibility: newVisibility,
           vibe: newVibe,
           member_limit: Number(newMemberLimit || '10'),
-          weekly_goal: Number(newWeeklyGoal || '5'),
           reliability_min: Number(newReliabilityMin || '90'),
           recruiting: newRecruiting,
           min_xp_required: Number(minJoinXp || '500'),
@@ -301,6 +301,7 @@ export default function Squads() {
       setNewQuestions('What position do you usually play?\nWhat days are you free?');
       setNewPreferredDays('Mon, Wed, Sat');
       setNewSkillFocus('Consistency, Defense, Team play');
+      setPostLocation({ latitude: 33.6846, longitude: -117.8265, areaName: '' });
       setMinJoinXp('500');
       await refreshMySquads();
       await refreshDiscover('');
@@ -386,11 +387,15 @@ export default function Squads() {
         title: postTitle,
         preferredTime: postPreferredTime,
         notes: postNotes,
+        locationName: postLocation.areaName || null,
+        locationLatitude: postLocation.latitude,
+        locationLongitude: postLocation.longitude,
       });
       setMatchPostOpen(false);
       setPostTitle('');
       setPostNotes('Looking for a reliable local matchup.');
       setPostPreferredTime('Weeknights after 6 PM');
+      setPostLocation({ latitude: 33.6846, longitude: -117.8265, areaName: '' });
       await refreshCompetition();
     } catch (e: any) {
       alert(e?.message ?? 'Could not create squad game post.');
@@ -533,10 +538,6 @@ export default function Squads() {
             <div className="font-semibold">{Number(squad.wins ?? 0)}-{Number(squad.losses ?? 0)}</div>
           </div>
           <div className="rounded-xl bg-secondary/40 p-2">
-            <div className="text-muted-foreground">Rating</div>
-            <div className="font-semibold">{Number(squad.rating ?? 1000)}</div>
-          </div>
-          <div className="rounded-xl bg-secondary/40 p-2">
             <div className="text-muted-foreground">Join gate</div>
             <div className="font-semibold">{Number(squad.min_xp_required ?? 0)} XP</div>
           </div>
@@ -586,9 +587,9 @@ export default function Squads() {
             <div className="text-sm mt-2">Captains can invite you directly into squads.</div>
           </div>
           <div className="glass-card p-4">
-            <div className="text-sm text-muted-foreground">Squad game invites</div>
-            <div className="text-2xl font-bold mt-1">{loadingCompetition ? '...' : pendingGameInvites.length}</div>
-            <div className="text-sm mt-2">Game invites sent to you through your squads now live here.</div>
+            <div className="text-sm text-muted-foreground">Open matchup board</div>
+            <div className="text-2xl font-bold mt-1">{loadingCompetition ? '...' : openBoardPosts.length}</div>
+            <div className="text-sm mt-2">Post squad matchups, challenge nearby squads, and handle all squad game invites here.</div>
           </div>
         </div>
 
@@ -756,6 +757,7 @@ export default function Squads() {
                           </div>
                           <span className="text-xs rounded-full bg-secondary px-2 py-1">{sportLabel(post.squad_sport ?? null)}</span>
                         </div>
+                        {post.location_name ? <div className="text-sm"><span className="text-muted-foreground">Location:</span> {post.location_name}</div> : null}
                         {post.preferred_time ? <div className="text-sm"><span className="text-muted-foreground">Preferred time:</span> {post.preferred_time}</div> : null}
                         {post.notes ? <div className="text-sm text-muted-foreground">{post.notes}</div> : null}
                         <Button
@@ -783,6 +785,7 @@ export default function Squads() {
                   <div key={post.id} className="rounded-2xl border p-3 space-y-2">
                     <div className="font-semibold">{post.squad_name}</div>
                     <div className="text-sm">{post.title}</div>
+                    {post.location_name ? <div className="text-xs text-muted-foreground">{post.location_name}</div> : null}
                     {post.preferred_time ? <div className="text-xs text-muted-foreground">{post.preferred_time}</div> : null}
                     <Button variant="secondary" disabled={busyCompetitionId === post.id} onClick={() => onClosePost(post.id, post.squad_id)}>{busyCompetitionId === post.id ? 'Working...' : 'Close post'}</Button>
                   </div>
@@ -799,6 +802,7 @@ export default function Squads() {
                   <div key={challenge.id} className="rounded-2xl border p-3 space-y-2">
                     <div className="font-semibold">{challenge.challenger_squad_name} vs {challenge.challenged_squad_name}</div>
                     {challenge.message ? <div className="text-sm text-muted-foreground">{challenge.message}</div> : null}
+                    <div className="text-xs text-muted-foreground">Use the result recorder after the squads finish the matchup.</div>
                     <Button
                       disabled={busyCompetitionId === challenge.id}
                       onClick={() => {
@@ -825,6 +829,7 @@ export default function Squads() {
                     <div className="text-sm text-muted-foreground">Winner: {result.winner_squad_id === result.squad_a_id ? result.squad_a_name : result.squad_b_name}</div>
                     <div className="text-xs text-muted-foreground mt-1">+{result.points_awarded} squad points</div>
                     {result.notes ? <div className="text-sm mt-2">{result.notes}</div> : null}
+                    <div className="text-xs text-muted-foreground mt-2">Recorded {new Date(result.recorded_at).toLocaleString()}</div>
                   </div>
                 ))}
               </section>
@@ -845,7 +850,6 @@ export default function Squads() {
             <div className="space-y-2"><Label>Motto</Label><Input value={newMotto} onChange={(e) => setNewMotto(e.target.value)} placeholder="Fast, reliable, team first" /></div>
             <div className="space-y-2"><Label>Member limit</Label><Input type="number" value={newMemberLimit} onChange={(e) => setNewMemberLimit(e.target.value)} /></div>
             <div className="space-y-2"><Label>Minimum XP</Label><Input type="number" value={minJoinXp} onChange={(e) => setMinJoinXp(e.target.value)} /></div>
-            <div className="space-y-2"><Label>Weekly goal</Label><Input type="number" value={newWeeklyGoal} onChange={(e) => setNewWeeklyGoal(e.target.value)} /></div>
             <div className="space-y-2"><Label>Reliability minimum</Label><Input type="number" value={newReliabilityMin} onChange={(e) => setNewReliabilityMin(e.target.value)} /></div>
             <div className="space-y-2"><Label>Primary color</Label><Input type="color" value={newPrimaryColor} onChange={(e) => setNewPrimaryColor(e.target.value)} /></div>
             <div className="space-y-2"><Label>Secondary color</Label><Input type="color" value={newSecondaryColor} onChange={(e) => setNewSecondaryColor(e.target.value)} /></div>
@@ -892,8 +896,9 @@ export default function Squads() {
             <div className="space-y-2"><Label>Squad</Label><Select value={postSquadId} onValueChange={setPostSquadId}><SelectTrigger><SelectValue placeholder="Choose your squad" /></SelectTrigger><SelectContent>{leaderSquads.map((squad) => <SelectItem key={squad.squad_id} value={squad.squad_id}>{squad.name}</SelectItem>)}</SelectContent></Select></div>
             <div className="space-y-2"><Label>Title</Label><Input value={postTitle} onChange={(e) => setPostTitle(e.target.value)} placeholder="Looking for a 5v5 run this weekend" /></div>
             <div className="space-y-2"><Label>Preferred time</Label><Input value={postPreferredTime} onChange={(e) => setPostPreferredTime(e.target.value)} placeholder="Saturday morning" /></div>
+            <div className="space-y-2"><Label>Matchup location</Label><LocationPicker value={postLocation} onChange={setPostLocation} /></div>
             <div className="space-y-2"><Label>Notes</Label><Textarea value={postNotes} onChange={(e) => setPostNotes(e.target.value)} rows={4} placeholder="Share skill range, area, and vibe." /></div>
-            <Button disabled={!postSquadId || !postTitle.trim() || busyCompetitionId === 'create-post'} onClick={onCreateMatchPost}>{busyCompetitionId === 'create-post' ? 'Posting...' : 'Post squad game'}</Button>
+            <Button disabled={!postSquadId || !postTitle.trim() || !postLocation.areaName.trim() || busyCompetitionId === 'create-post'} onClick={onCreateMatchPost}>{busyCompetitionId === 'create-post' ? 'Posting...' : 'Post squad game'}</Button>
           </div>
         </DialogContent>
       </Dialog>
