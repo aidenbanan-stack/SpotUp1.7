@@ -68,6 +68,7 @@ export type SquadPermissionBundle = {
   canViewAuditLogs: boolean;
   canViewBanList: boolean;
   canManageChannels: boolean;
+  canManageEvents: boolean;
 };
 
 export type SquadAuditRecord = {
@@ -194,13 +195,25 @@ export type SquadRivalry = {
   status: 'heated' | 'active' | 'emerging';
 };
 
+export type SquadEventRsvpStatus = 'going' | 'maybe' | 'not_going';
+
 export type SquadEventCard = {
   id: string;
   title: string;
   kind: 'practice' | 'scrimmage' | 'tryout' | 'tournament' | 'hangout';
   starts_at: string;
+  ends_at: string | null;
   attendee_count: number;
+  maybe_count: number;
+  not_going_count: number;
   location: string;
+  notes: string;
+  visibility: 'members_only' | 'leadership_only' | 'public';
+  creator_id: string | null;
+  creator_username: string | null;
+  my_rsvp: SquadEventRsvpStatus | null;
+  recurrence_rule: string | null;
+  max_attendees: number | null;
 };
 
 function normalizeSquadRow(row: any): SquadRow {
@@ -309,6 +322,7 @@ export function getSquadPermissionBundle(args: {
     canViewAuditLogs: isOwner || role === 'captain' || role === 'officer',
     canViewBanList: isOwner || role === 'captain' || role === 'officer',
     canManageChannels: isOwner,
+    canManageEvents: isOwner || role === 'captain' || role === 'officer',
   };
 }
 
@@ -574,27 +588,149 @@ export async function fetchSquadRivalries(squadId: string): Promise<SquadRivalry
   return [...byOpponent.values()].sort((a, b) => b.total_matches - a.total_matches);
 }
 
-export async function fetchSquadEvents(squadId: string): Promise<SquadEventCard[]> {
+export async function fetchSquadEvents(squadId: string, userId?: string | null): Promise<SquadEventCard[]> {
   try {
     const { data, error } = await supabase
       .from('squad_events')
-      .select('id, title, event_kind, starts_at, location_name, squad_event_rsvps(count)')
+      .select('id, title, event_kind, starts_at, ends_at, location_name, notes, visibility, creator_id, recurrence_rule, max_attendees, profiles:profiles!squad_events_creator_id_fkey(username), squad_event_rsvps(user_id, status)')
       .eq('squad_id', squadId)
-      .gte('starts_at', new Date().toISOString())
+      .gte('starts_at', new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString())
       .order('starts_at', { ascending: true })
-      .limit(6);
+      .limit(12);
     if (error) throw error;
-    return (data ?? []).map((row: any) => ({
-      id: row.id,
-      title: row.title ?? 'Squad Run',
-      kind: row.event_kind ?? 'practice',
-      starts_at: row.starts_at,
-      attendee_count: Number(row.squad_event_rsvps?.[0]?.count ?? 0),
-      location: row.location_name ?? 'TBD',
-    }));
+    return (data ?? []).map((row: any) => {
+      const rsvps = Array.isArray(row.squad_event_rsvps) ? row.squad_event_rsvps : [];
+      const attendee_count = rsvps.filter((item: any) => item?.status === 'going').length;
+      const maybe_count = rsvps.filter((item: any) => item?.status === 'maybe').length;
+      const not_going_count = rsvps.filter((item: any) => item?.status === 'not_going').length;
+      const myRsvp = userId ? (rsvps.find((item: any) => item?.user_id === userId)?.status ?? null) : null;
+      return {
+        id: row.id,
+        title: row.title ?? 'Squad Run',
+        kind: row.event_kind ?? 'practice',
+        starts_at: row.starts_at,
+        ends_at: row.ends_at ?? null,
+        attendee_count,
+        maybe_count,
+        not_going_count,
+        location: row.location_name ?? 'TBD',
+        notes: row.notes ?? '',
+        visibility: row.visibility ?? 'members_only',
+        creator_id: row.creator_id ?? null,
+        creator_username: row.profiles?.username ?? null,
+        my_rsvp: myRsvp,
+        recurrence_rule: row.recurrence_rule ?? null,
+        max_attendees: row.max_attendees != null ? Number(row.max_attendees) : null,
+      };
+    });
   } catch {
     return [];
   }
+}
+
+export async function createSquadEvent(args: {
+  squadId: string;
+  creatorId: string;
+  title: string;
+  kind: 'practice' | 'scrimmage' | 'tryout' | 'tournament' | 'hangout';
+  startsAt: string;
+  endsAt?: string | null;
+  locationName?: string | null;
+  notes?: string | null;
+  visibility?: 'members_only' | 'leadership_only' | 'public';
+  recurrenceRule?: string | null;
+  maxAttendees?: number | null;
+}): Promise<void> {
+  const context = await fetchActorContext(args.squadId, args.creatorId);
+  if (!context.permissions.canManageEvents) throw new Error('You do not have permission to schedule squad events.');
+  const title = args.title.trim();
+  if (!title) throw new Error('Event title is required.');
+  if (!args.startsAt) throw new Error('Event start time is required.');
+  const payload = {
+    squad_id: args.squadId,
+    creator_id: args.creatorId,
+    title,
+    event_kind: args.kind,
+    starts_at: new Date(args.startsAt).toISOString(),
+    ends_at: args.endsAt ? new Date(args.endsAt).toISOString() : null,
+    location_name: args.locationName?.trim() || null,
+    notes: args.notes?.trim() || null,
+    visibility: args.visibility ?? 'members_only',
+    recurrence_rule: args.recurrenceRule?.trim() || null,
+    max_attendees: args.maxAttendees != null ? Math.max(1, Math.floor(args.maxAttendees)) : null,
+  };
+  if (payload.ends_at && new Date(payload.ends_at) <= new Date(payload.starts_at)) throw new Error('Event end time must be after the start time.');
+  const { data: inserted, error } = await supabase.from('squad_events').insert(payload).select('id').single();
+  if (error) throw error;
+  await supabase.from('squad_event_rsvps').upsert({ squad_event_id: inserted.id, user_id: args.creatorId, status: 'going' }, { onConflict: 'squad_event_id,user_id' });
+  await supabase.from('squad_feed_events').insert({
+    squad_id: args.squadId,
+    event_type: 'event',
+    title: `New ${args.kind} scheduled`,
+    body: `${title}${args.locationName?.trim() ? ` at ${args.locationName.trim()}` : ''}`,
+    actor_user_id: args.creatorId,
+    metadata: { starts_at: payload.starts_at, recurrence_rule: payload.recurrence_rule },
+  });
+  await logSquadAudit({ squadId: args.squadId, action: 'squad_event_created', metadata: { title, kind: args.kind } });
+}
+
+export async function updateSquadEvent(args: {
+  squadId: string;
+  eventId: string;
+  actorUserId: string;
+  updates: Partial<{
+    title: string;
+    kind: 'practice' | 'scrimmage' | 'tryout' | 'tournament' | 'hangout';
+    startsAt: string;
+    endsAt: string | null;
+    locationName: string | null;
+    notes: string | null;
+    visibility: 'members_only' | 'leadership_only' | 'public';
+    recurrenceRule: string | null;
+    maxAttendees: number | null;
+  }>;
+}): Promise<void> {
+  const context = await fetchActorContext(args.squadId, args.actorUserId);
+  if (!context.permissions.canManageEvents) throw new Error('You do not have permission to edit squad events.');
+  const payload: Record<string, any> = {};
+  if (args.updates.title !== undefined) payload.title = args.updates.title.trim();
+  if (args.updates.kind !== undefined) payload.event_kind = args.updates.kind;
+  if (args.updates.startsAt !== undefined) payload.starts_at = new Date(args.updates.startsAt).toISOString();
+  if (args.updates.endsAt !== undefined) payload.ends_at = args.updates.endsAt ? new Date(args.updates.endsAt).toISOString() : null;
+  if (args.updates.locationName !== undefined) payload.location_name = args.updates.locationName?.trim() || null;
+  if (args.updates.notes !== undefined) payload.notes = args.updates.notes?.trim() || null;
+  if (args.updates.visibility !== undefined) payload.visibility = args.updates.visibility;
+  if (args.updates.recurrenceRule !== undefined) payload.recurrence_rule = args.updates.recurrenceRule?.trim() || null;
+  if (args.updates.maxAttendees !== undefined) payload.max_attendees = args.updates.maxAttendees != null ? Math.max(1, Math.floor(args.updates.maxAttendees)) : null;
+  const { error } = await supabase.from('squad_events').update(payload).eq('id', args.eventId).eq('squad_id', args.squadId);
+  if (error) throw error;
+  await logSquadAudit({ squadId: args.squadId, action: 'squad_event_updated', metadata: { event_id: args.eventId, ...payload } });
+}
+
+export async function deleteSquadEvent(args: { squadId: string; eventId: string; actorUserId: string }): Promise<void> {
+  const context = await fetchActorContext(args.squadId, args.actorUserId);
+  if (!context.permissions.canManageEvents) throw new Error('You do not have permission to remove squad events.');
+  await supabase.from('squad_event_rsvps').delete().eq('squad_event_id', args.eventId);
+  const { error } = await supabase.from('squad_events').delete().eq('id', args.eventId).eq('squad_id', args.squadId);
+  if (error) throw error;
+  await logSquadAudit({ squadId: args.squadId, action: 'squad_event_deleted', metadata: { event_id: args.eventId } });
+}
+
+export async function respondToSquadEvent(args: {
+  squadId: string;
+  eventId: string;
+  userId: string;
+  status: SquadEventRsvpStatus;
+}): Promise<void> {
+  const { data: member, error: memberError } = await supabase.from('squad_members').select('user_id').eq('squad_id', args.squadId).eq('user_id', args.userId).maybeSingle();
+  if (memberError) throw memberError;
+  if (!member) throw new Error('You must be a squad member to RSVP.');
+  const { error } = await supabase.from('squad_event_rsvps').upsert({
+    squad_event_id: args.eventId,
+    user_id: args.userId,
+    status: args.status,
+  }, { onConflict: 'squad_event_id,user_id' });
+  if (error) throw error;
 }
 
 export async function fetchSquadFeed(args: {

@@ -34,8 +34,10 @@ import { Switch } from '@/components/ui/switch';
 import {
   banSquadUser,
   createSquadAnnouncement,
+  createSquadEvent,
   createSquadInvite,
   deleteSquadById,
+  deleteSquadEvent,
   fetchMySquads,
   fetchSquadAnnouncements,
   fetchSquadAuditLogs,
@@ -59,8 +61,10 @@ import {
   reviewSquadJoinRequest,
   revokeSquadInvite,
   postSquadChatMessage,
+  respondToSquadEvent,
   searchProfilesForSquadInvites,
   submitSquadJoinRequest,
+  updateSquadEvent,
   updateSquadMemberRole,
   updateSquadProfile,
   updateSquadAnnouncementPin,
@@ -72,6 +76,7 @@ import {
   type SquadChatMessage,
   type SquadApplicant,
   type SquadEventCard,
+  type SquadEventRsvpStatus,
   type SquadFeedItem,
   type SquadInviteCandidate,
   type SquadInviteRecord,
@@ -87,6 +92,23 @@ function formatDate(input?: string | null) {
   const date = new Date(input);
   if (Number.isNaN(+date)) return 'TBD';
   return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function toLocalDateTimeValue(input?: string | null) {
+  if (!input) return '';
+  const date = new Date(input);
+  if (Number.isNaN(+date)) return '';
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function recurrenceLabel(rule?: string | null) {
+  if (!rule) return 'One-time';
+  if (rule.includes('INTERVAL=2')) return 'Every 2 weeks';
+  if (rule.includes('FREQ=DAILY')) return 'Daily';
+  if (rule.includes('FREQ=WEEKLY')) return 'Weekly';
+  if (rule.includes('FREQ=MONTHLY')) return 'Monthly';
+  return 'Custom repeat';
 }
 
 function getDivisionFromRating(rating: number) {
@@ -119,6 +141,9 @@ export default function SquadDetail() {
   const [invitingUserId, setInvitingUserId] = useState<string | null>(null);
   const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
   const [postingAnnouncement, setPostingAnnouncement] = useState(false);
+  const [savingEvent, setSavingEvent] = useState(false);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [eventActionId, setEventActionId] = useState<string | null>(null);
 
   const [squad, setSquad] = useState<SquadRow | null>(null);
   const [members, setMembers] = useState<SquadMemberProfile[]>([]);
@@ -187,12 +212,24 @@ export default function SquadDetail() {
   const [skillFocusText, setSkillFocusText] = useState('');
   const [questionsDraft, setQuestionsDraft] = useState<{ question_text: string; is_required: boolean }[]>([]);
   const [channelsDraft, setChannelsDraft] = useState<{ channel_key: string; channel_name: string; is_private: boolean }[]>([]);
+  const [eventForm, setEventForm] = useState({
+    title: '',
+    kind: 'practice' as SquadEventCard['kind'],
+    starts_at: '',
+    ends_at: '',
+    location: '',
+    notes: '',
+    visibility: 'members_only' as SquadEventCard['visibility'],
+    recurrence_rule: '',
+    max_attendees: '',
+  });
 
   const isOwner = user?.id != null && squad?.owner_id === user.id;
   const permissions: SquadPermissionBundle = useMemo(() => getSquadPermissionBundle({ role: currentUserRole, isOwner, settings: settingsForm }), [currentUserRole, isOwner, settingsForm]);
   const canManage = permissions.canReviewApplications || permissions.canViewAuditLogs || permissions.canViewBanList || permissions.canEditSquadSettings;
   const canInvite = permissions.canInvitePlayers;
   const canPostAnnouncements = permissions.canPostAnnouncements;
+  const canManageEvents = permissions.canManageEvents;
   const availableChannels = useMemo(() => {
     const channels = step1Data?.channels ?? [];
     if (!isMember) return channels.filter((channel) => !channel.is_private);
@@ -233,7 +270,7 @@ export default function SquadDetail() {
         fetchSquadMembers(id),
         fetchMySquads(user.id),
         fetchSquadMatchHistory(id),
-        fetchSquadEvents(id),
+        fetchSquadEvents(id, user.id),
         fetchSquadStep1Data(id),
         fetchSquadAnnouncements(id).catch(() => []),
         fetchSquadJoinRequests(id).catch(() => []),
@@ -532,6 +569,99 @@ export default function SquadDetail() {
     }
   }
 
+  function startEditEvent(event: SquadEventCard) {
+    setEditingEventId(event.id);
+    setEventForm({
+      title: event.title,
+      kind: event.kind,
+      starts_at: toLocalDateTimeValue(event.starts_at),
+      ends_at: toLocalDateTimeValue(event.ends_at),
+      location: event.location === 'TBD' ? '' : event.location,
+      notes: event.notes ?? '',
+      visibility: event.visibility,
+      recurrence_rule: event.recurrence_rule ?? '',
+      max_attendees: event.max_attendees != null ? String(event.max_attendees) : '',
+    });
+  }
+
+  function resetEventForm() {
+    setEditingEventId(null);
+    setEventForm({
+      title: '',
+      kind: 'practice',
+      starts_at: '',
+      ends_at: '',
+      location: squad?.home_court ?? '',
+      notes: '',
+      visibility: 'members_only',
+      recurrence_rule: '',
+      max_attendees: '',
+    });
+  }
+
+  async function onSaveEvent() {
+    if (!id || !user?.id) return;
+    setSavingEvent(true);
+    try {
+      const payload = {
+        title: eventForm.title,
+        kind: eventForm.kind,
+        startsAt: eventForm.starts_at,
+        endsAt: eventForm.ends_at || null,
+        locationName: eventForm.location || null,
+        notes: eventForm.notes || null,
+        visibility: eventForm.visibility,
+        recurrenceRule: eventForm.recurrence_rule || null,
+        maxAttendees: eventForm.max_attendees ? Number(eventForm.max_attendees) : null,
+      };
+      if (editingEventId) {
+        await updateSquadEvent({ squadId: id, eventId: editingEventId, actorUserId: user.id, updates: payload });
+        toast({ title: 'Event updated' });
+      } else {
+        await createSquadEvent({ squadId: id, creatorId: user.id, ...payload });
+        toast({ title: 'Event scheduled' });
+      }
+      resetEventForm();
+      await loadAll();
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Could not save event', description: e?.message ?? 'Please try again.', variant: 'destructive' });
+    } finally {
+      setSavingEvent(false);
+    }
+  }
+
+  async function onDeleteEvent(eventId: string) {
+    if (!id || !user?.id) return;
+    setEventActionId(eventId);
+    try {
+      await deleteSquadEvent({ squadId: id, eventId, actorUserId: user.id });
+      if (editingEventId === eventId) resetEventForm();
+      await loadAll();
+      toast({ title: 'Event removed' });
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Could not remove event', description: e?.message ?? 'Please try again.', variant: 'destructive' });
+    } finally {
+      setEventActionId(null);
+    }
+  }
+
+  async function onRespondEvent(eventId: string, status: SquadEventRsvpStatus) {
+    if (!id || !user?.id) return;
+    setEventActionId(`${eventId}:${status}`);
+    try {
+      await respondToSquadEvent({ squadId: id, eventId, userId: user.id, status });
+      setEvents(await fetchSquadEvents(id, user.id));
+      toast({ title: `RSVP updated to ${status.replace('_', ' ')}` });
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Could not update RSVP', description: e?.message ?? 'Please try again.', variant: 'destructive' });
+    } finally {
+      setEventActionId(null);
+    }
+  }
+
   async function onUnban(memberUserId: string) {
     if (!id || !user?.id) return;
     setMemberActionUserId(memberUserId);
@@ -725,10 +855,36 @@ export default function SquadDetail() {
               <CardHeader><CardTitle>Upcoming squad events</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 {events.length === 0 ? <div className="text-sm text-muted-foreground">No upcoming squad events yet.</div> : events.map((event) => (
-                  <div key={event.id} className="rounded-xl border p-3">
-                    <div className="font-medium">{event.title}</div>
-                    <div className="text-sm text-muted-foreground">{event.kind} • {formatDate(event.starts_at)}</div>
-                    <div className="text-sm text-muted-foreground">{event.location} • {event.attendee_count} going</div>
+                  <div key={event.id} className="rounded-xl border p-3 space-y-3">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="font-medium">{event.title}</div>
+                          <Badge variant="outline" className="capitalize">{event.kind}</Badge>
+                          <Badge variant="secondary">{recurrenceLabel(event.recurrence_rule)}</Badge>
+                        </div>
+                        <div className="text-sm text-muted-foreground mt-1">{formatDate(event.starts_at)}{event.ends_at ? ` to ${formatDate(event.ends_at)}` : ''}</div>
+                        <div className="text-sm text-muted-foreground">{event.location} • {event.attendee_count} going • {event.maybe_count} maybe</div>
+                        {event.notes ? <div className="text-sm mt-2 whitespace-pre-wrap">{event.notes}</div> : null}
+                      </div>
+                      <div className="text-xs text-muted-foreground">{event.creator_username ? `by ${event.creator_username}` : 'Scheduled by leadership'}</div>
+                    </div>
+                    {isMember ? (
+                      <div className="flex flex-wrap gap-2">
+                        {(['going', 'maybe', 'not_going'] as SquadEventRsvpStatus[]).map((status) => (
+                          <Button
+                            key={status}
+                            size="sm"
+                            variant={event.my_rsvp === status ? 'default' : 'secondary'}
+                            disabled={eventActionId === `${event.id}:${status}`}
+                            onClick={() => onRespondEvent(event.id, status)}
+                          >
+                            {eventActionId === `${event.id}:${status}` ? 'Saving...' : status.replace('_', ' ')}
+                          </Button>
+                        ))}
+                        {event.max_attendees ? <div className="text-xs text-muted-foreground self-center">Cap {event.max_attendees}</div> : null}
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </CardContent>
@@ -950,8 +1106,59 @@ export default function SquadDetail() {
                   <div className="rounded-xl border p-3"><div className="font-medium">Announcements</div><div className="text-sm text-muted-foreground">{permissions.canPostAnnouncements ? 'Enabled' : 'Not allowed'}</div></div>
                   <div className="rounded-xl border p-3"><div className="font-medium">Member moderation</div><div className="text-sm text-muted-foreground">{permissions.canManageMembers ? 'Enabled' : 'Not allowed'}</div></div>
                   <div className="rounded-xl border p-3"><div className="font-medium">Settings edits</div><div className="text-sm text-muted-foreground">{permissions.canEditSquadSettings ? 'Owner only' : 'Read only'}</div></div>
+                  <div className="rounded-xl border p-3"><div className="font-medium">Event scheduling</div><div className="text-sm text-muted-foreground">{canManageEvents ? 'Leadership can schedule' : 'Read only'}</div></div>
                 </CardContent>
               </Card>
+              <Card>
+                <CardHeader><CardTitle>{editingEventId ? 'Edit squad event' : 'Schedule squad event'}</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  {!canManageEvents ? (
+                    <div className="text-sm text-muted-foreground">Only leadership can schedule and edit squad events.</div>
+                  ) : (
+                    <>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-2"><Label>Title</Label><Input value={eventForm.title} onChange={(e) => setEventForm((current) => ({ ...current, title: e.target.value }))} placeholder="Tuesday practice at ARC" /></div>
+                        <div className="space-y-2"><Label>Event type</Label><Select value={eventForm.kind} onValueChange={(value) => setEventForm((current) => ({ ...current, kind: value as SquadEventCard['kind'] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="practice">Practice</SelectItem><SelectItem value="scrimmage">Scrimmage</SelectItem><SelectItem value="tryout">Tryout</SelectItem><SelectItem value="tournament">Tournament</SelectItem><SelectItem value="hangout">Hangout</SelectItem></SelectContent></Select></div>
+                        <div className="space-y-2"><Label>Starts</Label><Input type="datetime-local" value={eventForm.starts_at} onChange={(e) => setEventForm((current) => ({ ...current, starts_at: e.target.value }))} /></div>
+                        <div className="space-y-2"><Label>Ends</Label><Input type="datetime-local" value={eventForm.ends_at} onChange={(e) => setEventForm((current) => ({ ...current, ends_at: e.target.value }))} /></div>
+                        <div className="space-y-2"><Label>Location</Label><Input value={eventForm.location} onChange={(e) => setEventForm((current) => ({ ...current, location: e.target.value }))} placeholder="ARC courts" /></div>
+                        <div className="space-y-2"><Label>Visibility</Label><Select value={eventForm.visibility} onValueChange={(value) => setEventForm((current) => ({ ...current, visibility: value as SquadEventCard['visibility'] }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="members_only">Members only</SelectItem><SelectItem value="leadership_only">Leadership only</SelectItem><SelectItem value="public">Public preview</SelectItem></SelectContent></Select></div>
+                        <div className="space-y-2"><Label>Repeat</Label><Select value={eventForm.recurrence_rule || 'none'} onValueChange={(value) => setEventForm((current) => ({ ...current, recurrence_rule: value === 'none' ? '' : value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">One-time</SelectItem><SelectItem value="RRULE:FREQ=DAILY">Daily</SelectItem><SelectItem value="RRULE:FREQ=WEEKLY">Weekly</SelectItem><SelectItem value="RRULE:FREQ=WEEKLY;INTERVAL=2">Every 2 weeks</SelectItem><SelectItem value="RRULE:FREQ=MONTHLY">Monthly</SelectItem></SelectContent></Select></div>
+                        <div className="space-y-2"><Label>Max attendees</Label><Input type="number" min="1" value={eventForm.max_attendees} onChange={(e) => setEventForm((current) => ({ ...current, max_attendees: e.target.value }))} placeholder="Optional" /></div>
+                      </div>
+                      <div className="space-y-2"><Label>Notes</Label><Textarea rows={4} value={eventForm.notes} onChange={(e) => setEventForm((current) => ({ ...current, notes: e.target.value }))} placeholder="Bring dark and light shirts. First 10 confirmed go on the main run." /></div>
+                      <div className="flex gap-2 flex-wrap">
+                        <Button onClick={onSaveEvent} disabled={savingEvent || !eventForm.title.trim() || !eventForm.starts_at}>{savingEvent ? 'Saving...' : editingEventId ? 'Save changes' : 'Schedule event'}</Button>
+                        {editingEventId ? <Button type="button" variant="secondary" onClick={resetEventForm}>Cancel edit</Button> : null}
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader><CardTitle>Scheduled events</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  {events.length === 0 ? <div className="text-sm text-muted-foreground">No upcoming events to manage yet.</div> : events.map((event) => (
+                    <div key={event.id} className="rounded-xl border p-3 space-y-2">
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div>
+                          <div className="font-medium">{event.title}</div>
+                          <div className="text-sm text-muted-foreground">{formatDate(event.starts_at)} • {event.location}</div>
+                          <div className="text-xs text-muted-foreground mt-1">{event.attendee_count} going • {event.maybe_count} maybe • {recurrenceLabel(event.recurrence_rule)}</div>
+                        </div>
+                        {canManageEvents ? (
+                          <div className="flex gap-2 flex-wrap">
+                            <Button size="sm" variant="secondary" onClick={() => startEditEvent(event)}>Edit</Button>
+                            <Button size="sm" variant="destructive" disabled={eventActionId === event.id} onClick={() => onDeleteEvent(event.id)}>{eventActionId === event.id ? 'Removing...' : 'Delete'}</Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
               <Card>
                 <CardHeader><CardTitle>Applications</CardTitle></CardHeader>
                 <CardContent className="space-y-3">
