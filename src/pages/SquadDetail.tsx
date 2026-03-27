@@ -6,6 +6,9 @@ import {
   Crown,
   MapPin,
   Megaphone,
+  MessageSquare,
+  Pin,
+  Send,
   ShieldCheck,
   Sparkles,
   Swords,
@@ -39,6 +42,7 @@ import {
   fetchSquadBanList,
   fetchSquadEvents,
   fetchSquadFeed,
+  fetchSquadChatMessages,
   fetchSquadInvites,
   getSquadPermissionBundle,
   joinSquadById,
@@ -54,15 +58,18 @@ import {
   replaceSquadTags,
   reviewSquadJoinRequest,
   revokeSquadInvite,
+  postSquadChatMessage,
   searchProfilesForSquadInvites,
   submitSquadJoinRequest,
   updateSquadMemberRole,
   updateSquadProfile,
+  updateSquadAnnouncementPin,
   unbanSquadUser,
   upsertSquadSettings,
   type SquadAnnouncement,
   type SquadAuditRecord,
   type SquadBanRecord,
+  type SquadChatMessage,
   type SquadApplicant,
   type SquadEventCard,
   type SquadFeedItem,
@@ -122,6 +129,11 @@ export default function SquadDetail() {
   const [events, setEvents] = useState<SquadEventCard[]>([]);
   const [feed, setFeed] = useState<SquadFeedItem[]>([]);
   const [announcements, setAnnouncements] = useState<SquadAnnouncement[]>([]);
+  const [activeChannel, setActiveChannel] = useState('main');
+  const [chatMessages, setChatMessages] = useState<SquadChatMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [pinningAnnouncementId, setPinningAnnouncementId] = useState<string | null>(null);
   const [joinRequests, setJoinRequests] = useState<SquadApplicant[]>([]);
   const [pendingInvites, setPendingInvites] = useState<SquadInviteRecord[]>([]);
   const [auditLogs, setAuditLogs] = useState<SquadAuditRecord[]>([]);
@@ -181,6 +193,12 @@ export default function SquadDetail() {
   const canManage = permissions.canReviewApplications || permissions.canViewAuditLogs || permissions.canViewBanList || permissions.canEditSquadSettings;
   const canInvite = permissions.canInvitePlayers;
   const canPostAnnouncements = permissions.canPostAnnouncements;
+  const availableChannels = useMemo(() => {
+    const channels = step1Data?.channels ?? [];
+    if (!isMember) return channels.filter((channel) => !channel.is_private);
+    return channels;
+  }, [step1Data, isMember]);
+  const pinnedAnnouncements = useMemo(() => announcements.filter((item) => item.is_pinned), [announcements]);
 
   function canManageMember(target: SquadMemberProfile) {
     if (!user?.id) return false;
@@ -191,6 +209,20 @@ export default function SquadDetail() {
     if (isOwner) return true;
     if (!permissions.canManageMembers) return false;
     return rank(actorRole) > rank(targetRole);
+  }
+
+  async function loadChannelMessages(channelKey: string) {
+    if (!id || !isMember) {
+      setChatMessages([]);
+      return;
+    }
+    try {
+      const rows = await fetchSquadChatMessages({ squadId: id, channel: channelKey, limit: 60 });
+      setChatMessages(rows);
+    } catch (e) {
+      console.error(e);
+      setChatMessages([]);
+    }
   }
 
   async function loadAll() {
@@ -249,6 +281,7 @@ export default function SquadDetail() {
       setSkillFocusText(step1.settings.skill_focus.join(', '));
       setQuestionsDraft(step1.joinQuestions.map((item) => ({ question_text: item.question_text, is_required: item.is_required })));
       setChannelsDraft(step1.channels.map((item) => ({ channel_key: item.channel_key, channel_name: item.channel_name, is_private: item.is_private })));
+      setActiveChannel((current) => step1.channels.some((channel) => channel.channel_key === current) ? current : (step1.channels[0]?.channel_key ?? 'main'));
     } catch (e: any) {
       console.error(e);
       toast({ title: 'Could not load squad', description: e?.message ?? 'Please try again.', variant: 'destructive' });
@@ -261,6 +294,11 @@ export default function SquadDetail() {
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, user?.id]);
+
+  useEffect(() => {
+    void loadChannelMessages(activeChannel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, isMember, activeChannel]);
 
   useEffect(() => {
     const handle = window.setTimeout(async () => {
@@ -460,6 +498,37 @@ export default function SquadDetail() {
       toast({ title: 'Could not post announcement', description: e?.message ?? 'Please try again.', variant: 'destructive' });
     } finally {
       setPostingAnnouncement(false);
+    }
+  }
+
+  async function onSendChatMessage() {
+    if (!id || !user?.id || !chatDraft.trim()) return;
+    setSendingMessage(true);
+    try {
+      await postSquadChatMessage({ squadId: id, senderId: user.id, channel: activeChannel, body: chatDraft });
+      setChatDraft('');
+      await loadChannelMessages(activeChannel);
+      await loadAll();
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Could not send message', description: e?.message ?? 'Please try again.', variant: 'destructive' });
+    } finally {
+      setSendingMessage(false);
+    }
+  }
+
+  async function onToggleAnnouncementPin(announcementId: string, nextPinned: boolean) {
+    if (!id || !user?.id) return;
+    setPinningAnnouncementId(announcementId);
+    try {
+      await updateSquadAnnouncementPin({ squadId: id, announcementId, actorUserId: user.id, isPinned: nextPinned });
+      await loadAll();
+      toast({ title: nextPinned ? 'Announcement pinned' : 'Announcement unpinned' });
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Could not update announcement pin', description: e?.message ?? 'Please try again.', variant: 'destructive' });
+    } finally {
+      setPinningAnnouncementId(null);
     }
   }
 
@@ -703,17 +772,129 @@ export default function SquadDetail() {
         </TabsContent>
 
         <TabsContent value="feed" className="space-y-4">
+          {pinnedAnnouncements.length > 0 ? (
+            <Card>
+              <CardHeader><CardTitle>Pinned leadership updates</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                {pinnedAnnouncements.map((item) => (
+                  <div key={item.id} className="rounded-xl border p-3 bg-amber-50/60 dark:bg-amber-950/20">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant="secondary"><Pin className="w-3 h-3 mr-1" /> Pinned</Badge>
+                        <div className="font-medium">{item.title}</div>
+                      </div>
+                      {canPostAnnouncements ? (
+                        <Button variant="ghost" size="sm" disabled={pinningAnnouncementId === item.id} onClick={() => onToggleAnnouncementPin(item.id, false)}>Unpin</Button>
+                      ) : null}
+                    </div>
+                    <div className="text-sm mt-2">{item.body}</div>
+                    <div className="text-xs text-muted-foreground mt-2">{item.author_username ?? 'Squad staff'} • {formatDate(item.created_at)}</div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <Card>
+              <CardHeader><CardTitle>Squad feed</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                {feed.map((item) => (
+                  <div key={item.id} className="rounded-xl border p-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge variant="outline" className="capitalize">{item.type}</Badge>
+                      <div className="font-medium">{item.title}</div>
+                    </div>
+                    <div className="text-sm mt-1">{item.body}</div>
+                    <div className="text-xs text-muted-foreground mt-2">{formatDate(item.created_at)}</div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><MessageSquare className="w-4 h-4" /> Squad chat</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {!isMember ? (
+                  <div className="text-sm text-muted-foreground">Join the squad to unlock channel chat and member-only coordination.</div>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      {availableChannels.map((channel) => (
+                        <Button
+                          key={channel.id}
+                          type="button"
+                          size="sm"
+                          variant={activeChannel === channel.channel_key ? 'default' : 'secondary'}
+                          onClick={() => setActiveChannel(channel.channel_key)}
+                        >
+                          {channel.channel_name}
+                        </Button>
+                      ))}
+                    </div>
+
+                    <div className="max-h-[420px] overflow-y-auto rounded-xl border p-3 space-y-3">
+                      {chatMessages.length === 0 ? (
+                        <div className="text-sm text-muted-foreground">No messages yet in this channel. Start the conversation.</div>
+                      ) : chatMessages.map((message) => (
+                        <div key={message.id} className="rounded-lg border px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium text-sm">{message.sender_username ?? 'Squad member'}</div>
+                            <div className="text-xs text-muted-foreground">{formatDate(message.created_at)}</div>
+                          </div>
+                          <div className="text-sm mt-1 whitespace-pre-wrap">{message.body}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Textarea
+                        rows={3}
+                        value={chatDraft}
+                        onChange={(e) => setChatDraft(e.target.value)}
+                        placeholder={activeChannel === 'announcements' ? 'Post an official squad update to the announcements channel' : 'Send a message to your squad'}
+                      />
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="text-xs text-muted-foreground">
+                          {activeChannel === 'announcements' && !canPostAnnouncements ? 'Only leadership can post in announcements.' : 'Use chat to coordinate runs, strategy, and availability.'}
+                        </div>
+                        <Button onClick={onSendChatMessage} disabled={sendingMessage || !chatDraft.trim() || (activeChannel === 'announcements' && !canPostAnnouncements)}>
+                          <Send className="w-4 h-4 mr-2" />
+                          {sendingMessage ? 'Sending...' : 'Send'}
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
           <Card>
-            <CardHeader><CardTitle>Squad feed</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Announcement board</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              {feed.map((item) => (
+              {announcements.length === 0 ? <div className="text-sm text-muted-foreground">No announcements yet.</div> : announcements.map((item) => (
                 <div key={item.id} className="rounded-xl border p-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge variant="outline" className="capitalize">{item.type}</Badge>
-                    <div className="font-medium">{item.title}</div>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="font-medium">{item.title}</div>
+                      {item.is_pinned ? <Badge variant="secondary">Pinned</Badge> : null}
+                    </div>
+                    {canPostAnnouncements ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={pinningAnnouncementId === item.id}
+                        onClick={() => onToggleAnnouncementPin(item.id, !item.is_pinned)}
+                      >
+                        {item.is_pinned ? 'Unpin' : 'Pin'}
+                      </Button>
+                    ) : null}
                   </div>
                   <div className="text-sm mt-1">{item.body}</div>
-                  <div className="text-xs text-muted-foreground mt-2">{formatDate(item.created_at)}</div>
+                  <div className="text-xs text-muted-foreground mt-2">{item.author_username ?? 'Squad staff'} • {formatDate(item.created_at)}</div>
                 </div>
               ))}
             </CardContent>

@@ -130,6 +130,16 @@ export type SquadAnnouncement = {
   created_at: string;
 };
 
+export type SquadChatMessage = {
+  id: string;
+  squad_id: string;
+  sender_id: string;
+  sender_username: string | null;
+  channel: string;
+  body: string;
+  created_at: string;
+};
+
 export type SquadInviteCandidate = {
   id: string;
   username: string | null;
@@ -270,7 +280,7 @@ function sortByOrder<T extends { sort_order: number }>(rows: T[]): T[] {
 
 function normalizeRole(role?: string | null): SquadRole {
   const value = (role ?? 'member').toLowerCase();
-  if (value === 'captain') return 'captain';
+  if (value === 'owner' || value === 'captain') return 'captain';
   if (value === 'officer') return 'officer';
   return 'member';
 }
@@ -1258,6 +1268,99 @@ export async function banSquadUser(args: {
   });
   if (error) throw error;
   await logSquadAudit({ squadId: args.squadId, action: 'member_banned', metadata: { target_user_id: args.memberUserId, reason: args.reason ?? null } });
+}
+
+export async function fetchSquadChatMessages(args: {
+  squadId: string;
+  channel?: string;
+  limit?: number;
+}): Promise<SquadChatMessage[]> {
+  const channel = (args.channel?.trim() || 'main').toLowerCase();
+  const { data, error } = await supabase
+    .from('squad_messages')
+    .select('id, squad_id, sender_id, channel, body, created_at, profiles:profiles!squad_messages_sender_id_fkey(username)')
+    .eq('squad_id', args.squadId)
+    .eq('channel', channel)
+    .order('created_at', { ascending: false })
+    .limit(args.limit ?? 40);
+  if (error) throw error;
+  return ((data ?? []) as any[]).map((row) => ({
+    id: row.id,
+    squad_id: row.squad_id,
+    sender_id: row.sender_id,
+    sender_username: row.profiles?.username ?? null,
+    channel: row.channel ?? channel,
+    body: row.body ?? '',
+    created_at: row.created_at,
+  })).reverse();
+}
+
+export async function postSquadChatMessage(args: {
+  squadId: string;
+  senderId: string;
+  channel?: string;
+  body: string;
+}): Promise<void> {
+  const body = args.body.trim();
+  if (!body) throw new Error('Message cannot be empty.');
+
+  const [membershipRes, channelsRes] = await Promise.all([
+    supabase.from('squad_members').select('user_id').eq('squad_id', args.squadId).eq('user_id', args.senderId).maybeSingle(),
+    supabase.from('squad_channels').select('channel_key, is_private').eq('squad_id', args.squadId),
+  ]);
+
+  if (membershipRes.error) throw membershipRes.error;
+  if (!membershipRes.data) throw new Error('You must be a squad member to chat here.');
+
+  const channel = (args.channel?.trim() || 'main').toLowerCase();
+  const knownChannel = ((channelsRes.data ?? []) as any[]).find((row) => String(row.channel_key ?? '').toLowerCase() === channel);
+  if (knownChannel?.is_private && !membershipRes.data) throw new Error('You do not have access to this private channel.');
+
+  if (channel === 'announcements') {
+    await ensureCanPostAnnouncements(args.squadId, args.senderId);
+  }
+
+  const { error } = await supabase.from('squad_messages').insert({
+    squad_id: args.squadId,
+    sender_id: args.senderId,
+    channel,
+    body,
+  });
+  if (error) throw error;
+
+  if (channel === 'announcements') {
+    await supabase.from('squad_feed_events').insert({
+      squad_id: args.squadId,
+      event_type: 'announcement',
+      title: 'Channel update',
+      body,
+      actor_user_id: args.senderId,
+    });
+  } else {
+    await supabase.from('squad_feed_events').insert({
+      squad_id: args.squadId,
+      event_type: 'member',
+      title: 'Squad chat is active',
+      body: body.length > 120 ? `${body.slice(0, 117)}...` : body,
+      actor_user_id: args.senderId,
+    });
+  }
+}
+
+export async function updateSquadAnnouncementPin(args: {
+  squadId: string;
+  announcementId: string;
+  actorUserId: string;
+  isPinned: boolean;
+}): Promise<void> {
+  await ensureCanPostAnnouncements(args.squadId, args.actorUserId);
+  const { error } = await supabase
+    .from('squad_announcements')
+    .update({ is_pinned: args.isPinned })
+    .eq('id', args.announcementId)
+    .eq('squad_id', args.squadId);
+  if (error) throw error;
+  await logSquadAudit({ squadId: args.squadId, action: args.isPinned ? 'announcement_pinned' : 'announcement_unpinned', metadata: { announcement_id: args.announcementId } });
 }
 
 export async function fetchSquadAnnouncements(squadId: string): Promise<SquadAnnouncement[]> {
