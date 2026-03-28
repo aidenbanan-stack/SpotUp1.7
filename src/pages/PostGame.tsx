@@ -27,7 +27,7 @@ export default function PostGame() {
     const loadPlayers = async () => {
       if (!game) return;
 
-      const unique = Array.from(new Set([...(game.playerIds ?? []), ...(game.checkedInIds ?? [])]));
+      const unique = Array.from(new Set(game.checkedInIds ?? []));
 
       setPlayersLoading(true);
       try {
@@ -51,7 +51,7 @@ export default function PostGame() {
 
   const hasVotedAll = useMemo(() => {
     if (!game || !user) return false;
-    return Boolean(game.postGameVoters && game.postGameVoters[user.id]);
+    return Boolean(game.postGameVoters && game.postGameVoters[user.id] && Object.keys(game.postGameVoters[user.id] ?? {}).length > 0);
   }, [game, user]);
 
   const handleVoteComplete = async (votes: { category: string; votedUserId: string }[]) => {
@@ -73,6 +73,8 @@ export default function PostGame() {
   };
 
   const isHost = !!user && !!game && game.hostId === user.id;
+  const checkedInUserIds = useMemo(() => new Set(game?.checkedInIds ?? []), [game?.checkedInIds]);
+  const canCurrentUserVote = !!user && checkedInUserIds.has(user.id);
 
   const noShowCandidates = useMemo(() => {
     if (!game) return [] as User[];
@@ -147,10 +149,20 @@ export default function PostGame() {
       <main className="px-4 py-6 max-w-2xl mx-auto space-y-4">
         {playersLoading ? (
           <div className="text-sm text-muted-foreground">Loading players…</div>
+        ) : game.status !== 'finished' ? (
+          <div className="glass-card p-6 text-center">
+            <p className="font-semibold">Voting not open yet</p>
+            <p className="text-sm text-muted-foreground mt-1">The host must end the game before post-game voting opens.</p>
+          </div>
         ) : players.length < 2 ? (
           <div className="glass-card p-6 text-center">
             <p className="font-semibold">Not enough players</p>
             <p className="text-sm text-muted-foreground mt-1">Need at least 2 players to vote.</p>
+          </div>
+        ) : !canCurrentUserVote ? (
+          <div className="glass-card p-6 text-center">
+            <p className="font-semibold">Check-in required</p>
+            <p className="text-sm text-muted-foreground mt-1">Only players who were checked in can submit post-game votes.</p>
           </div>
         ) : hasVotedAll ? (
           <div className="glass-card p-6 text-center">

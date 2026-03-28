@@ -25,12 +25,10 @@ export default function GameHistory() {
     if (tab === 'scheduled') return myGames.filter(g => g.status === 'scheduled');
 
     if (tab === 'concluded') {
-      // Concluded: finished games where voting is present (best-effort proxy for "finalized").
-      return myGames.filter(g => g.status === 'finished' && !!g.postGameVotes && !!g.postGameVoters);
+      return myGames.filter(g => g.status === 'finished');
     }
 
-    // Active: live games, plus finished games where voting is not finalized yet.
-    return myGames.filter(g => g.status === 'live' || (g.status === 'finished' && (!g.postGameVotes || !g.postGameVoters)));
+    return myGames.filter(g => g.status === 'live');
   }, [myGames, tab]);
 
   return (

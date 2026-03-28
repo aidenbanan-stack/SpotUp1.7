@@ -341,8 +341,57 @@ export async function setGameStatus(
 }
 
 export async function toggleCheckIn(gameId: string, targetUserId: string): Promise<Game> {
-  const { data, error } = await supabase
+  const { data: auth } = await supabase.auth.getUser();
+  const meId = auth.user?.id;
+  if (!meId) throw new Error('Not authenticated.');
+
+  const { data: rpcData, error: rpcError } = await supabase
     .rpc('toggle_check_in', { p_game_id: gameId, p_target_user_id: targetUserId })
+    .single();
+
+  if (!rpcError && rpcData) {
+    return await hydrateGame(rowToGame(rpcData as GameRow));
+  }
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('games')
+    .select('*')
+    .eq('id', gameId)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  const row = existing as GameRow & { checked_in_at?: Record<string, string> | null };
+  if (row.host_id !== meId) throw new Error('Only the host can check players in.');
+  if ((row.status ?? 'scheduled') === 'finished') throw new Error('This game has already ended.');
+
+  const signedUpIds = Array.from(new Set([row.host_id, ...((row.player_ids ?? []) as string[])]));
+  if (!signedUpIds.includes(targetUserId)) {
+    throw new Error('That player is not part of this game.');
+  }
+
+  const nextCheckedIn = new Set<string>(row.checked_in_ids ?? []);
+  const nextCheckedInAt = { ...((row.checked_in_at ?? {}) as Record<string, string>) };
+
+  if (nextCheckedIn.has(targetUserId)) {
+    nextCheckedIn.delete(targetUserId);
+    delete nextCheckedInAt[targetUserId];
+  } else {
+    nextCheckedIn.add(targetUserId);
+    nextCheckedInAt[targetUserId] = new Date().toISOString();
+  }
+
+  const status = row.status === 'scheduled' && nextCheckedIn.size >= 2 ? 'live' : row.status;
+
+  const { data, error } = await supabase
+    .from('games')
+    .update({
+      checked_in_ids: Array.from(nextCheckedIn),
+      checked_in_at: nextCheckedInAt,
+      status,
+    })
+    .eq('id', gameId)
+    .select('*')
     .single();
 
   if (error) throw error;
@@ -350,9 +399,30 @@ export async function toggleCheckIn(gameId: string, targetUserId: string): Promi
 }
 
 export async function setRunsStarted(gameId: string, runsStarted: boolean): Promise<Game> {
+  const { data: existing, error: fetchError } = await supabase
+    .from('games')
+    .select('*')
+    .eq('id', gameId)
+    .single();
+
+  if (fetchError) throw fetchError;
+  const row = existing as GameRow;
+
+  if (runsStarted && (row.checked_in_ids ?? []).length < 2) {
+    throw new Error('Check in at least 2 players before starting the game.');
+  }
+
+  const nextStatus = runsStarted
+    ? 'live'
+    : row.status === 'finished'
+      ? 'finished'
+      : (row.checked_in_ids ?? []).length >= 2
+        ? 'live'
+        : 'scheduled';
+
   const { data, error } = await supabase
     .from('games')
-    .update({ runs_started: runsStarted })
+    .update({ runs_started: runsStarted, status: nextStatus })
     .eq('id', gameId)
     .select('*')
     .single();
@@ -362,8 +432,41 @@ export async function setRunsStarted(gameId: string, runsStarted: boolean): Prom
 }
 
 export async function endGame(gameId: string): Promise<Game> {
-  const { data, error } = await supabase
+  const { data: rpcData, error: rpcError } = await supabase
     .rpc('end_game_session', { p_game_id: gameId })
+    .single();
+
+  if (!rpcError && rpcData) {
+    return await hydrateGame(rowToGame(rpcData as GameRow));
+  }
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('games')
+    .select('*')
+    .eq('id', gameId)
+    .single();
+
+  if (fetchError) throw fetchError;
+  const row = existing as GameRow;
+
+  const checkedIn = Array.from(new Set(row.checked_in_ids ?? []));
+  if (checkedIn.length < 2) {
+    throw new Error('Check in at least 2 players before ending the game.');
+  }
+
+  if (row.status === 'finished') {
+    return await hydrateGame(rowToGame(row));
+  }
+
+  const { data, error } = await supabase
+    .from('games')
+    .update({
+      status: 'finished',
+      ended_at: new Date().toISOString(),
+      runs_started: false,
+    })
+    .eq('id', gameId)
+    .select('*')
     .single();
 
   if (error) throw error;
@@ -432,11 +535,73 @@ type PostGameVoters = Record<string, Partial<Record<PostGameVoteCategory, string
  */
 export async function submitPostGameVotes(
   gameId: string,
-  _voterId: string,
+  voterId: string,
   votes: { category: PostGameVoteCategory; votedUserId: string }[]
 ): Promise<Game> {
-  const { data, error } = await supabase
+  const { data: rpcData, error: rpcError } = await supabase
     .rpc('submit_post_game_votes', { p_game_id: gameId, p_votes: votes })
+    .single();
+
+  if (!rpcError && rpcData) {
+    return await hydrateGame(rowToGame(rpcData as GameRow));
+  }
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('games')
+    .select('*')
+    .eq('id', gameId)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  const row = existing as GameRow;
+  if ((row.status ?? 'scheduled') !== 'finished') {
+    throw new Error('Post-game voting opens after the game ends.');
+  }
+
+  const eligiblePlayers = Array.from(new Set(row.checked_in_ids ?? []));
+  if (!eligiblePlayers.includes(voterId)) {
+    throw new Error('Only checked-in players can submit post-game votes.');
+  }
+
+  const eligibleSet = new Set(eligiblePlayers);
+  const dedupedVotes = Array.from(
+    new Map(
+      votes
+        .filter((vote) => vote?.category && vote?.votedUserId)
+        .filter((vote) => vote.votedUserId !== voterId)
+        .filter((vote) => eligibleSet.has(vote.votedUserId))
+        .map((vote) => [vote.category, vote])
+    ).values()
+  );
+
+  if (!dedupedVotes.length) {
+    throw new Error('Submit at least one valid vote for a checked-in player other than yourself.');
+  }
+
+  const previousVoters = ((row.post_game_voters ?? {}) as PostGameVoters) || {};
+  if (previousVoters[voterId] && Object.keys(previousVoters[voterId] ?? {}).length > 0) {
+    throw new Error('You already submitted votes for this game.');
+  }
+
+  const nextVotes: PostGameVotes = { ...((row.post_game_votes ?? {}) as PostGameVotes) };
+  const nextVoters: PostGameVoters = { ...previousVoters, [voterId]: { ...(previousVoters[voterId] ?? {}) } };
+
+  for (const vote of dedupedVotes) {
+    const categoryBucket = { ...(nextVotes[vote.category] ?? {}) };
+    categoryBucket[vote.votedUserId] = (categoryBucket[vote.votedUserId] ?? 0) + 1;
+    nextVotes[vote.category] = categoryBucket;
+    nextVoters[voterId][vote.category] = vote.votedUserId;
+  }
+
+  const { data, error } = await supabase
+    .from('games')
+    .update({
+      post_game_votes: nextVotes,
+      post_game_voters: nextVoters,
+    })
+    .eq('id', gameId)
+    .select('*')
     .single();
 
   if (error) throw error;

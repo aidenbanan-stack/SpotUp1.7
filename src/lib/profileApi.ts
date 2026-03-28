@@ -35,6 +35,79 @@ type ProfileRow = {
   created_at?: string;
 };
 
+
+type GameStatsRow = {
+  host_id: string;
+  checked_in_ids: string[] | null;
+  post_game_votes: Record<string, Record<string, number>> | null;
+  location_area_name?: string | null;
+  status?: string | null;
+};
+
+async function enrichUsersWithComputedStats(users: User[]): Promise<User[]> {
+  if (!users.length) return users;
+
+  try {
+    const { data, error } = await supabase
+      .from('games')
+      .select('host_id,checked_in_ids,post_game_votes,location_area_name,status');
+
+    if (error) throw error;
+
+    const rows = (data ?? []) as GameStatsRow[];
+    const byId = new Map<string, User>(users.map((user) => [user.id, { ...user, stats: { ...user.stats }, votesReceived: { ...user.votesReceived } }]));
+
+    for (const row of rows) {
+      if ((row.status ?? 'scheduled') !== 'finished') continue;
+
+      const checkedIn = Array.from(new Set(row.checked_in_ids ?? []));
+      const uniqueCourtsForGame = row.location_area_name?.trim() || null;
+
+      if (byId.has(row.host_id)) {
+        const host = byId.get(row.host_id)!;
+        host.stats.gamesHosted += 1;
+      }
+
+      for (const playerId of checkedIn) {
+        const profile = byId.get(playerId);
+        if (!profile) continue;
+        profile.stats.gamesPlayed += 1;
+        if (uniqueCourtsForGame) {
+          (profile as User & { __courtSet?: Set<string> }).__courtSet ??= new Set<string>();
+          (profile as User & { __courtSet?: Set<string> }).__courtSet!.add(uniqueCourtsForGame);
+        }
+      }
+
+      const votes = row.post_game_votes ?? {};
+      const mapCategory = (category: string) => {
+        if (category === 'most_dominant') return 'mostDominant';
+        if (category === 'winner') return 'winner';
+        if (category === 'best_teammate') return 'bestTeammate';
+        return null;
+      };
+
+      for (const [category, bucket] of Object.entries(votes)) {
+        const mapped = mapCategory(category);
+        if (!mapped) continue;
+        for (const [playerId, count] of Object.entries(bucket ?? {})) {
+          const profile = byId.get(playerId);
+          if (!profile) continue;
+          profile.votesReceived[mapped] += Number(count ?? 0);
+        }
+      }
+    }
+
+    return Array.from(byId.values()).map((user) => {
+      const courtSet = (user as User & { __courtSet?: Set<string> }).__courtSet;
+      return {
+        ...user,
+        uniqueCourtsPlayed: courtSet?.size ?? user.uniqueCourtsPlayed ?? 0,
+      };
+    });
+  } catch {
+    return users;
+  }
+}
 function emailToUsername(email: string): string {
   const base = email.split('@')[0] || 'player';
   // Keep it simple and URL-safe.
@@ -159,8 +232,9 @@ export async function getOrCreateMyProfile(): Promise<User> {
   if (selErr) throw selErr;
   if (existing) {
     const baseUser = profileToUser(existing as ProfileRow);
+    const [enriched] = await enrichUsersWithComputedStats([baseUser]);
     const access = await fetchMyAccessState();
-    return { ...baseUser, isPro: access.is_pro, isAdmin: access.is_admin };
+    return { ...enriched, isPro: access.is_pro, isAdmin: access.is_admin };
   }
 
   const insert: Partial<ProfileRow> = {
@@ -181,8 +255,9 @@ export async function getOrCreateMyProfile(): Promise<User> {
 
   if (insErr) throw insErr;
   const baseUser = profileToUser(created as ProfileRow);
+  const [enriched] = await enrichUsersWithComputedStats([baseUser]);
   const access = await fetchMyAccessState();
-  return { ...baseUser, isPro: access.is_pro, isAdmin: access.is_admin };
+  return { ...enriched, isPro: access.is_pro, isAdmin: access.is_admin };
 }
 
 /**
@@ -201,7 +276,10 @@ export async function fetchProfileById(id: string): Promise<User | null> {
 
   console.log('[fetchProfileById] direct data:', data, 'error:', error);
 
-  if (data) return profileToUser(data as ProfileRow);
+  if (data) {
+    const [enriched] = await enrichUsersWithComputedStats([profileToUser(data as ProfileRow)]);
+    return enriched;
+  }
 
   // Always try RPC if direct didn't return data (even if error is null)
   const { data: rpcData, error: rpcError } = await supabase.rpc('get_public_profiles', {
@@ -213,7 +291,9 @@ export async function fetchProfileById(id: string): Promise<User | null> {
   if (rpcError) return null;
 
   const row = (rpcData?.[0] ?? null) as any;
-  return row ? publicProfileToUser(row as PublicProfileRow) : null;
+  if (!row) return null;
+  const [enriched] = await enrichUsersWithComputedStats([publicProfileToUser(row as PublicProfileRow)]);
+  return enriched;
 }
 
 /**
@@ -231,11 +311,11 @@ export async function fetchProfilesByIds(ids: string[]): Promise<User[]> {
       .in('id', ids);
 
     if (error) throw error;
-    return (data ?? []).map((row) => profileToUser(row as ProfileRow));
+    return await enrichUsersWithComputedStats((data ?? []).map((row) => profileToUser(row as ProfileRow)));
   } catch (err) {
     const { data, error } = await supabase.rpc('get_public_profiles', { p_user_ids: ids });
     if (error) throw err;
-    return (data ?? []).map((row: any) => publicProfileToUser(row as PublicProfileRow));
+    return await enrichUsersWithComputedStats((data ?? []).map((row: any) => publicProfileToUser(row as PublicProfileRow)));
   }
 }
 
@@ -254,7 +334,7 @@ export async function searchProfiles(query: string, limit = 20): Promise<User[]>
     .limit(limit);
 
   if (error) throw error;
-  return (data ?? []).map((row) => profileToUser(row as ProfileRow));
+  return await enrichUsersWithComputedStats((data ?? []).map((row) => profileToUser(row as ProfileRow)));
 }
 
 export type UpdateMyProfileInput = {
@@ -305,7 +385,8 @@ export async function updateMyProfile(input: UpdateMyProfileInput) {
 
   if (error) throw new Error(error.message);
 
-  return profileToUser(data as ProfileRow);
+  const [enriched] = await enrichUsersWithComputedStats([profileToUser(data as ProfileRow)]);
+  return enriched;
 }
 
 /**

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { SportBadge } from '@/components/SportIcon';
-import { ArrowLeft, Users, CheckCircle2, Clock, Play, Pause, Flag, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Users, Clock, Play, Pause, Flag, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { endGame, fetchGameById, setRunsStarted, toggleCheckIn } from '@/lib/gamesApi';
 import { supabase } from '@/lib/supabaseClient';
@@ -14,11 +14,9 @@ export default function LiveGame() {
   const { games, setGames, user } = useApp();
   const [busy, setBusy] = useState(false);
 
-  const game = games.find(g => g.id === id);
-
+  const game = games.find((g) => g.id === id);
   const isHost = useMemo(() => !!user && !!game && game.hostId === user.id, [user, game]);
 
-  // Realtime: when host ends game, everyone gets the update
   useEffect(() => {
     if (!id) return;
 
@@ -30,9 +28,9 @@ export default function LiveGame() {
         async () => {
           try {
             const fresh = await fetchGameById(id);
-            setGames(prev => prev.map(g => (g.id === id ? fresh : g)));
+            setGames((prev) => prev.map((g) => (g.id === id ? fresh : g)));
           } catch {
-            // ignore
+            // ignore realtime refresh errors
           }
         }
       )
@@ -44,11 +42,12 @@ export default function LiveGame() {
   }, [id, setGames]);
 
   const checkedInIds = game?.checkedInIds ?? [];
-  const signedUpIds = game?.playerIds ?? [];
-  const notCheckedInIds = signedUpIds.filter(pid => !checkedInIds.includes(pid));
+  const signedUpIds = useMemo(() => Array.from(new Set(game?.playerIds ?? [])), [game?.playerIds]);
+  const notCheckedInIds = signedUpIds.filter((pid) => !checkedInIds.includes(pid));
+  const canRunGame = checkedInIds.length >= 2;
 
   const resolveName = (userId: string) => {
-    const u = game?.players?.find(p => p.id === userId);
+    const u = game?.players?.find((p) => p.id === userId);
     return u?.username ?? 'Player';
   };
 
@@ -67,7 +66,7 @@ export default function LiveGame() {
     try {
       setBusy(true);
       const updated = await toggleCheckIn(game.id, targetUserId);
-      setGames(games.map(g => (g.id === game.id ? { ...g, ...updated } : g)));
+      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
       toast.success(targetIsCheckedIn ? 'Check-in removed.' : 'Player checked in.');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to update check-in.';
@@ -79,10 +78,14 @@ export default function LiveGame() {
 
   const handleRunsToggle = async () => {
     if (!user || !game || !isHost) return;
+    if (!game.runsStarted && !canRunGame) {
+      toast.error('Check in at least 2 players before starting the game.');
+      return;
+    }
     try {
       setBusy(true);
       const updated = await setRunsStarted(game.id, !game.runsStarted);
-      setGames(games.map(g => (g.id === game.id ? { ...g, ...updated } : g)));
+      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
       toast.success(!game.runsStarted ? 'Runs started.' : 'Runs paused.');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to update runs.';
@@ -94,11 +97,16 @@ export default function LiveGame() {
 
   const handleEndGame = async () => {
     if (!user || !game || !isHost) return;
+    if (!canRunGame) {
+      toast.error('Check in at least 2 players before ending the game.');
+      return;
+    }
     try {
       setBusy(true);
       const updated = await endGame(game.id);
-      setGames(games.map(g => (g.id === game.id ? { ...g, ...updated } : g)));
-      toast.success('Game ended. Postgame voting is open.');      navigate(`/game/${game.id}/postgame`);
+      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
+      toast.success('Game ended. Postgame voting is open.');
+      navigate(`/game/${game.id}/postgame`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to end game.';
       toast.error(msg);
@@ -147,13 +155,9 @@ export default function LiveGame() {
           <div className="glass-card p-4">
             <p className="font-semibold text-foreground">Game ended</p>
             <p className="text-sm text-muted-foreground mt-1">
-              Postgame voting is open for everyone who played.
+              Postgame voting is open for everyone who checked in and played.
             </p>
-            <Button
-              className="mt-3 w-full"
-              variant="hero"
-              onClick={() => navigate(`/game/${game.id}/postgame`)}
-            >
+            <Button className="mt-3 w-full" variant="hero" onClick={() => navigate(`/game/${game.id}/postgame`)}>
               Go to voting
             </Button>
           </div>
@@ -169,16 +173,20 @@ export default function LiveGame() {
 
           <div className="flex items-center justify-between gap-3">
             <p className="font-semibold text-foreground">Check-in</p>
-            {isHost ? (
-              <span className="text-sm text-muted-foreground">Use the player list below to check players in.</span>
-            ) : (
-              <span className="text-sm text-muted-foreground">The host must check you in when you arrive.</span>
-            )}
+            <span className="text-sm text-muted-foreground">
+              {checkedInIds.length}/ {Math.max(signedUpIds.length, 1)} checked in
+            </span>
           </div>
+
+          {!canRunGame && !showPostGameCTA && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+              At least 2 checked-in players are required before the game can start or end.
+            </div>
+          )}
 
           {isHost && (
             <div className="flex gap-2">
-              <Button variant="secondary" className="flex-1" onClick={handleRunsToggle} disabled={busy}>
+              <Button variant="secondary" className="flex-1" onClick={handleRunsToggle} disabled={busy || game.status === 'finished' || game.status === 'completed'}>
                 {game.runsStarted ? <Pause className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
                 {game.runsStarted ? 'Pause runs' : 'Start runs'}
               </Button>
@@ -199,13 +207,16 @@ export default function LiveGame() {
             <p className="text-sm text-muted-foreground">No one checked in yet.</p>
           ) : (
             <div className="space-y-2">
-              {checkedInIds.map(pid => (
-                <div key={pid} className="flex items-center justify-between gap-3">
-                  <p className="text-sm">{resolveName(pid)}</p>
+              {checkedInIds.map((pid) => (
+                <div key={pid} className="flex items-center justify-between gap-3 rounded-xl bg-secondary/30 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{resolveName(pid)}</p>
+                    <p className="text-xs text-muted-foreground">Ready to play</p>
+                  </div>
                   <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-muted-foreground" />
+                    <CheckCircle2 className="w-4 h-4 text-green-500" />
                     {isHost && (
-                      <Button size="sm" variant="outline" disabled={busy} onClick={() => void handleCheckInToggle(pid)}>
+                      <Button size="sm" variant="outline" disabled={busy || showPostGameCTA} onClick={() => void handleCheckInToggle(pid)}>
                         Remove
                       </Button>
                     )}
@@ -217,14 +228,24 @@ export default function LiveGame() {
         </div>
 
         <div className="glass-card p-5">
-          <p className="font-semibold mb-3">Not checked in ({notCheckedInIds.length})</p>
+          <div className="flex items-center gap-2 mb-3">
+            <Clock className="w-4 h-4" />
+            <p className="font-semibold">Not checked in ({notCheckedInIds.length})</p>
+          </div>
           {notCheckedInIds.length === 0 ? (
             <p className="text-sm text-muted-foreground">Everyone is checked in.</p>
           ) : (
             <div className="space-y-2">
-              {notCheckedInIds.map(pid => (
-                <div key={pid} className="text-sm text-muted-foreground">
-                  {resolveName(pid)}
+              {notCheckedInIds.map((pid) => (
+                <div key={pid} className="flex items-center justify-between gap-3 rounded-xl bg-secondary/20 px-3 py-2">
+                  <p className="text-sm text-foreground truncate">{resolveName(pid)}</p>
+                  {isHost ? (
+                    <Button size="sm" variant="hero" disabled={busy || showPostGameCTA} onClick={() => void handleCheckInToggle(pid)}>
+                      Check in
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Waiting on host</span>
+                  )}
                 </div>
               ))}
             </div>
