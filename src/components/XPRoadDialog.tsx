@@ -45,6 +45,7 @@ const ROAD_BOTTOM_PADDING = 72;
 const ROAD_MAX_XP = 11000;
 const TIER_CARD_HEIGHT = 94;
 const TIER_SECTION_HEIGHT = 320;
+const ROOKIE_CARD_OFFSET = 64;
 const MARKER_CLUSTER_GAP = 34;
 
 function xpForSport(user: User, sport: SportFilter): number {
@@ -122,7 +123,8 @@ function roadHeightForTierCount(tierCount: number) {
 
 function tierAnchorY(index: number, roadTiers: RoadTier[]) {
   const roadHeight = roadHeightForTierCount(roadTiers.length);
-  const roadBottom = roadHeight - ROAD_BOTTOM_PADDING - TIER_CARD_HEIGHT / 2;
+  const rookieOffset = index === 0 ? ROOKIE_CARD_OFFSET : 0;
+  const roadBottom = roadHeight - ROAD_BOTTOM_PADDING - TIER_CARD_HEIGHT / 2 + rookieOffset;
   return roadBottom - index * TIER_SECTION_HEIGHT;
 }
 
@@ -424,7 +426,7 @@ export function XPRoadDialog({
               <div className="mb-4 flex items-center justify-between gap-3 px-1">
                 <div>
                   <h3 className="text-lg font-bold">Road</h3>
-                  <p className="text-sm text-muted-foreground">Ticks and profiles now follow exact XP positions on the center road.</p>
+                  <p className="text-sm text-muted-foreground">Ticks and profiles follow exact XP positions on the center road.</p>
                 </div>
                 <Badge variant="secondary" className="rounded-full px-3 py-1">
                   {sportLabel}

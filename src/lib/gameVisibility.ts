@@ -1,6 +1,6 @@
 import type { Game } from '@/types';
 
-const STALE_SCHEDULED_HOME_GRACE_MINUTES = 30;
+export const STALE_SCHEDULED_HOME_GRACE_MINUTES = 30;
 
 export function getScheduledDiscoveryExpiry(game: Game): number {
   return game.dateTime.getTime() + STALE_SCHEDULED_HOME_GRACE_MINUTES * 60 * 1000;
@@ -22,8 +22,13 @@ export function isAffiliatedWithGame(game: Game, userId?: string | null): boolea
 }
 
 export function shouldShowGameOnHome(game: Game, now = Date.now()): boolean {
-  if (game.status === 'scheduled' && isStaleScheduledGame(game, now)) {
-    return false;
-  }
-  return true;
+  return !isStaleScheduledGame(game, now);
+}
+
+export function shouldShowGameOnMap(game: Game, now = Date.now()): boolean {
+  return !isStaleScheduledGame(game, now);
+}
+
+export function shouldShowGameInScheduled(game: Game, now = Date.now()): boolean {
+  return game.status === 'scheduled' && !isStaleScheduledGame(game, now);
 }

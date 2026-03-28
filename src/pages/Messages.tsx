@@ -310,6 +310,15 @@ export default function Messages() {
     );
   }
 
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (mode !== 'chat') return;
+    const node = chatScrollRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
+  }, [mode, messages.length, activeConv?.id]);
+
   if (mode === 'chat' && activeConv) {
     const myUpcomingHosted = (games ?? [])
       .filter((g) => g.hostId === user?.id)
@@ -377,7 +386,7 @@ export default function Messages() {
           </div>
         </header>
 
-        <main className="px-4 py-4 max-w-2xl mx-auto space-y-3">
+        <main ref={chatScrollRef} className="px-4 py-4 max-w-2xl mx-auto space-y-3 h-[calc(100dvh-180px)] overflow-y-auto flex flex-col justify-end">
           {messages.length === 0 ? (
             <div className="text-center text-muted-foreground py-10">
               No messages yet.

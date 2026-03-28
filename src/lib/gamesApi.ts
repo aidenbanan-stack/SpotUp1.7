@@ -97,6 +97,58 @@ export async function fetchGames(): Promise<Game[]> {
   return await Promise.all(base.map(hydrateGame));
 }
 
+
+export async function purgeExpiredScheduledGames(): Promise<void> {
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+  const { data: candidates, error: fetchError } = await supabase
+    .from('games')
+    .select('id,host_id,player_ids,checked_in_ids,runs_started,status')
+    .eq('status', 'scheduled')
+    .lt('date_time', cutoff);
+
+  if (fetchError) throw fetchError;
+
+  const rows = (candidates ?? []) as Array<{
+    id: string;
+    host_id: string;
+    player_ids?: string[] | null;
+    checked_in_ids?: string[] | null;
+    runs_started?: boolean | null;
+    status?: string | null;
+  }> ;
+
+  const staleIds = rows
+    .filter((row) => (row.status ?? 'scheduled') === 'scheduled')
+    .filter((row) => !row.runs_started && (row.checked_in_ids?.length ?? 0) === 0)
+    .map((row) => row.id);
+
+  if (!staleIds.length) return;
+
+  const hostsToPenalize = Array.from(new Set(
+    rows
+      .filter((row) => staleIds.includes(row.id))
+      .filter((row) => (row.player_ids?.length ?? 0) > 1)
+      .map((row) => row.host_id)
+  ));
+
+  if (hostsToPenalize.length) {
+    const { data: hostRows, error: hostFetchError } = await supabase
+      .from('profiles')
+      .select('id,reliability_score')
+      .in('id', hostsToPenalize);
+
+    if (hostFetchError) throw hostFetchError;
+
+    await Promise.all((hostRows ?? []).map(async (host: any) => {
+      const nextScore = Math.max(0, Number(host.reliability_score ?? 100) - 5);
+      await supabase.from('profiles').update({ reliability_score: nextScore }).eq('id', host.id);
+    }));
+  }
+
+  const { error: deleteError } = await supabase.from('games').delete().in('id', staleIds);
+  if (deleteError) throw deleteError;
+}
 export async function fetchGameById(gameId: string): Promise<Game> {
   const { data, error } = await supabase
     .from('games')

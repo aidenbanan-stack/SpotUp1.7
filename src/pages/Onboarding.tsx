@@ -4,7 +4,6 @@ import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SportGrid } from '@/components/SportSelector';
 import type { Sport } from '@/types';
 import spotupLogo from '@/assets/SpotUpLogoOld.png';
@@ -12,18 +11,20 @@ import { Camera } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { uploadMyAvatar, updateMyProfile } from '@/lib/profileApi';
+import { HeightSelect } from '@/components/HeightSelect';
+import { CityAutocomplete } from '@/components/CityAutocomplete';
 
 export default function Onboarding() {
   const navigate = useNavigate();
   const { user, setUser } = useApp();
 
-  const [username, setUsername] = useState(user?.username ?? '');
-  const [bio, setBio] = useState(user?.bio ?? '');
-  const [age, setAge] = useState(user?.age ? String(user.age) : '');
-  const [height, setHeight] = useState(user?.height ?? '');
-  const [city, setCity] = useState(user?.city ?? '');
-  const [primarySport, setPrimarySport] = useState<Sport[]>(user?.primarySport ? [user.primarySport] : []);
-  const [secondarySports, setSecondarySports] = useState<Sport[]>(user?.secondarySports ?? []);
+  const [username, setUsername] = useState('');
+  const [bio, setBio] = useState('');
+  const [age, setAge] = useState('');
+  const [height, setHeight] = useState('');
+  const [city, setCity] = useState('');
+  const [primarySport, setPrimarySport] = useState<Sport[]>([]);
+  const [secondarySports, setSecondarySports] = useState<Sport[]>([]);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -138,7 +139,7 @@ export default function Onboarding() {
             </div>
             <div>
               <label className="text-sm text-muted-foreground">City *</label>
-              <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Aliso Viejo, CA" />
+              <CityAutocomplete value={city} onChange={setCity} placeholder="Aliso Viejo, CA" />
             </div>
           </div>
 

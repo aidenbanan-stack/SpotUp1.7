@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { GameCard } from '@/components/GameCard';
 import { useApp } from '@/context/AppContext';
 import { ArrowLeft } from 'lucide-react';
-import { isAffiliatedWithGame } from '@/lib/gameVisibility';
+import { isAffiliatedWithGame, shouldShowGameInScheduled } from '@/lib/gameVisibility';
 
 type Tab = 'scheduled' | 'active' | 'concluded';
 
@@ -22,7 +22,7 @@ export default function GameHistory() {
   }, [games, user]);
 
   const filteredMyGames = useMemo(() => {
-    if (tab === 'scheduled') return myGames.filter(g => g.status === 'scheduled');
+    if (tab === 'scheduled') return myGames.filter((g) => shouldShowGameInScheduled(g));
 
     if (tab === 'concluded') {
       return myGames.filter(g => g.status === 'finished');

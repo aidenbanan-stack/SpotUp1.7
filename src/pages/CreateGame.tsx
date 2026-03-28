@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -7,9 +7,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { SportGrid } from '@/components/SportSelector';
-import { NumberStepper } from '@/components/NumberStepper';
 import { LocationPicker } from '@/components/LocationPicker';
-import { ArrowLeft, Calendar, Clock, Crown, MapPin, Sparkles, Users } from 'lucide-react';
+import { ArrowLeft, Calendar, Check, Clock, Crown, MapPin, Sparkles, Users } from 'lucide-react';
 import { Sport, SkillLevel, SKILL_LEVELS, Game } from '@/types';
 import { toast } from 'sonner';
 import { createGame } from '@/lib/gamesApi';
@@ -33,7 +32,17 @@ export default function CreateGame() {
   const [hostAgeMin, setHostAgeMin] = useState('18');
   const [hostAgeMax, setHostAgeMax] = useState('35');
   const [isRecurring, setIsRecurring] = useState(false);
-  const [recurrenceCount, setRecurrenceCount] = useState(4);
+  const [recurringDays, setRecurringDays] = useState<string[]>([]);
+  const recurringDayOptions = useMemo(() => ([
+    { key: 'MO', label: 'Mon' },
+    { key: 'TU', label: 'Tue' },
+    { key: 'WE', label: 'Wed' },
+    { key: 'TH', label: 'Thu' },
+    { key: 'FR', label: 'Fri' },
+    { key: 'SA', label: 'Sat' },
+    { key: 'SU', label: 'Sun' },
+  ]), []);
+
   const [location, setLocation] = useState({
     latitude: 34.0522,
     longitude: -118.2437,
@@ -109,7 +118,7 @@ export default function CreateGame() {
         hostProOnly,
         hostAgeMin: ageRestricted ? Math.max(0, Number(hostAgeMin || '0')) : null,
         hostAgeMax: ageRestricted ? Math.max(0, Number(hostAgeMax || '0')) : null,
-        recurrenceCount: isRecurring ? recurrenceCount : 1,
+        recurrenceCount: isRecurring ? Math.max(1, recurringDays.length) : 1,
         recurrenceIntervalDays: 7,
       });
 
@@ -280,8 +289,8 @@ export default function CreateGame() {
           <div className="flex items-center gap-2">
             <Crown className="w-4 h-4 text-primary" />
             <div>
-              <h3 className="font-semibold text-foreground">SpotUp Pro host filters</h3>
-              <p className="text-sm text-muted-foreground">Set who can join your hosted game.</p>
+              <h3 className="font-semibold text-foreground">SpotUp Pro host features</h3>
+              <p className="text-sm text-muted-foreground">Customize who can join and how your hosted game is scheduled.</p>
             </div>
           </div>
 
@@ -340,14 +349,31 @@ export default function CreateGame() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <h3 className="font-semibold text-foreground">Recurring Game</h3>
-              <p className="text-sm text-muted-foreground">Repeat this game weekly</p>
+              <p className="text-sm text-muted-foreground">Repeat this game on selected days of the week.</p>
             </div>
             <Switch checked={isRecurring} onCheckedChange={setIsRecurring} disabled={!user?.isPro} />
           </div>
           {isRecurring ? (
-            <div>
-              <label className="text-sm font-medium text-muted-foreground mb-2 block">Weeks to schedule</label>
-              <NumberStepper value={recurrenceCount} onChange={setRecurrenceCount} min={2} max={8} step={1} />
+            <div className="space-y-3">
+              <label className="text-sm font-medium text-muted-foreground block">Pick days on the 1 week calendar</label>
+              <div className="grid grid-cols-7 gap-2">
+                {recurringDayOptions.map((day) => {
+                  const selected = recurringDays.includes(day.key);
+                  return (
+                    <button
+                      key={day.key}
+                      type="button"
+                      onClick={() => setRecurringDays((current) => selected ? current.filter((value) => value !== day.key) : [...current, day.key])}
+                      className={`rounded-2xl border px-2 py-3 text-sm font-semibold transition ${selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-secondary/50 text-foreground'}`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <span>{day.label}</span>
+                        {selected ? <Check className="w-4 h-4" /> : <span className="h-4" />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
           {!user?.isPro ? (

@@ -81,10 +81,14 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleM
   const [map, setMap] = useState<google.maps.Map | null>(null);
 
   const [resolvedCenter, setResolvedCenter] = useState<LatLng>(center ?? defaultCenter);
+  const [myLocation, setMyLocation] = useState<LatLng | null>(center ?? null);
   const hasCenterProp = useMemo(() => !!center, [center]);
 
   useEffect(() => {
-    if (center) setResolvedCenter(center);
+    if (center) {
+      setResolvedCenter(center);
+      setMyLocation(center);
+    }
   }, [center?.lat, center?.lng]);
 
   useEffect(() => {
@@ -96,6 +100,7 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleM
       .then((loc) => {
         if (cancelled) return;
         setResolvedCenter(loc);
+        setMyLocation(loc);
       })
       .catch(() => undefined);
 
@@ -147,6 +152,21 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleM
       }}
       onClick={() => onGameSelect(null)}
     >
+      {myLocation ? (
+        <Marker
+          position={myLocation}
+          title="You are here"
+          icon={{
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 10,
+            fillColor: '#3b82f6',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 3,
+          }}
+        />
+      ) : null}
+
       {games.map((game) => {
         const position = {
           lat: game.location.latitude,

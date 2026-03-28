@@ -10,16 +10,20 @@ import { ArrowLeft, Camera, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { updateMyProfile, uploadMyAvatar } from '@/lib/profileApi';
+import { HeightSelect } from '@/components/HeightSelect';
+import { CityAutocomplete } from '@/components/CityAutocomplete';
 
 export default function EditProfile() {
   const navigate = useNavigate();
   const { user, setUser } = useApp();
 
-  const [username, setUsername] = useState(user?.username ?? '');
+  const prefillsEnabled = Boolean(user?.onboardingCompleted);
+
+  const [username, setUsername] = useState(prefillsEnabled ? (user?.username ?? '') : '');
   const [bio, setBio] = useState(user?.bio ?? '');
-  const [age, setAge] = useState(user?.age ? String(user.age) : '');
-  const [height, setHeight] = useState(user?.height ?? '');
-  const [city, setCity] = useState(user?.city ?? '');
+  const [age, setAge] = useState(prefillsEnabled && user?.age ? String(user.age) : '');
+  const [height, setHeight] = useState(prefillsEnabled ? (user?.height ?? '') : '');
+  const [city, setCity] = useState(prefillsEnabled ? (user?.city ?? '') : '');
   const [primarySport, setPrimarySport] = useState<Sport[]>(user?.primarySport ? [user.primarySport] : []);
   const [secondarySports, setSecondarySports] = useState<Sport[]>(user?.secondarySports ?? []);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -130,11 +134,11 @@ export default function EditProfile() {
             </div>
             <div>
               <label className="text-sm text-muted-foreground">Height</label>
-              <Input value={height} onChange={(e) => setHeight(e.target.value)} />
+              <HeightSelect value={height} onChange={setHeight} />
             </div>
             <div>
               <label className="text-sm text-muted-foreground">City *</label>
-              <Input value={city} onChange={(e) => setCity(e.target.value)} />
+              <CityAutocomplete value={city} onChange={setCity} placeholder="Irvine, CA" />
             </div>
           </div>
 

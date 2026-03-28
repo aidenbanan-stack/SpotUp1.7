@@ -10,7 +10,7 @@ import { ArrowLeft, Filter, Navigation, X, Key } from 'lucide-react';
 import { Game, SkillLevel, SKILL_LEVELS, SPORTS, Sport } from '@/types';
 import { hasGoogleMapsKey } from '@/lib/env';
 import { getBrowserLocation, LatLng } from '@/lib/geo';
-import { shouldShowGameOnHome } from '@/lib/gameVisibility';
+import { shouldShowGameOnMap } from '@/lib/gameVisibility';
 
 export default function MapView() {
   const navigate = useNavigate();
@@ -37,7 +37,7 @@ export default function MapView() {
 
   const filteredGames = useMemo(() => {
     return games.filter((game) => {
-      if (!shouldShowGameOnHome(game, nowMs)) return false;
+      if (!shouldShowGameOnMap(game, nowMs)) return false;
       if (selectedSport !== 'all' && game.sport !== selectedSport) return false;
       if (skillFilter !== 'all' && game.skillRequirement !== skillFilter) return false;
       if (privacyFilter === 'public' && game.isPrivate) return false;
@@ -145,7 +145,7 @@ export default function MapView() {
                   className="flex-1"
                   onClick={() => navigate(`/game/${selectedGame.id}`)}
                 >
-                  {selectedGame.isPrivate ? 'Request to Join' : 'Join Game'}
+View Game
                 </Button>
                 <Button variant="outline" onClick={() => setSelectedGame(null)}>
                   Close

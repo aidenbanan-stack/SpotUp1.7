@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
 import type { User, Sport, Game, Notification } from '@/types';
-import { fetchGames } from '@/lib/gamesApi';
+import { fetchGames, purgeExpiredScheduledGames } from '@/lib/gamesApi';
 import { fetchMyNotifications } from '@/lib/notificationsApi';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -41,6 +41,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       setGamesLoading(true);
       setGamesError(null);
+      await purgeExpiredScheduledGames().catch(() => undefined);
       const data = await fetchGames();
       setGames(data);
     } catch (err) {
