@@ -46,6 +46,7 @@ export default function Messages() {
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const convIdsRef = useRef<string[]>([]);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [draft, setDraft] = useState('');
 
@@ -302,6 +303,16 @@ export default function Messages() {
     }
   };
 
+
+  useEffect(() => {
+    if (mode !== 'chat') return;
+    const node = chatScrollRef.current;
+    if (!node) return;
+    window.requestAnimationFrame(() => {
+      node.scrollTop = node.scrollHeight;
+    });
+  }, [mode, messages.length, activeConv?.id]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground">
@@ -310,14 +321,6 @@ export default function Messages() {
     );
   }
 
-  const chatScrollRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (mode !== 'chat') return;
-    const node = chatScrollRef.current;
-    if (!node) return;
-    node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
-  }, [mode, messages.length, activeConv?.id]);
 
   if (mode === 'chat' && activeConv) {
     const myUpcomingHosted = (games ?? [])

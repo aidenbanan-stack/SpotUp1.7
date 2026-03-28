@@ -18,6 +18,7 @@ export default function EditProfile() {
   const { user, setUser } = useApp();
 
   const prefillsEnabled = Boolean(user?.onboardingCompleted);
+  const chatScrollRefFix = null;
 
   const [username, setUsername] = useState(prefillsEnabled ? (user?.username ?? '') : '');
   const [bio, setBio] = useState(user?.bio ?? '');
@@ -108,8 +109,10 @@ export default function EditProfile() {
             <div className="w-16 h-16 rounded-full bg-secondary/60 overflow-hidden flex items-center justify-center">
               {photoFile ? (
                 <img src={URL.createObjectURL(photoFile)} className="w-full h-full object-cover" />
-              ) : (
+              ) : user.profilePhotoUrl ? (
                 <img src={user.profilePhotoUrl} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-xl font-semibold text-muted-foreground">{(user.username ?? 'U').slice(0,1).toUpperCase()}</span>
               )}
             </div>
             <label className={cn('inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-secondary/60 cursor-pointer', saving && 'opacity-60 pointer-events-none')}>

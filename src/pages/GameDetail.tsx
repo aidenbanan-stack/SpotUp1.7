@@ -4,7 +4,7 @@ import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { SportIcon, SportBadge } from '@/components/SportIcon';
 import { PlayerLevelBadge } from '@/components/PlayerLevelBadge';
-import { ArrowLeft, Calendar, Clock, Lock, MapPin, Share2, Users } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, Lock, MapPin, Share2, Users, BellRing } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { createNotification } from '@/lib/notificationsApi';
@@ -95,8 +95,31 @@ export default function GameDetail() {
   const blockedByFilters = belowXpGate || blockedByProGate || missingAge || belowAgeGate || aboveAgeGate;
 
   const canViewLive = (isHost || isJoined) && isLive;
+  const signedUpPlayerIds = Array.from(new Set((game.playerIds ?? []).filter((pid) => pid && pid !== game.hostId)));
+  const postGameVoters = game.postGameVoters ?? {};
+  const playersPendingVotes = signedUpPlayerIds.filter((pid) => !postGameVoters[pid] || Object.keys(postGameVoters[pid] ?? {}).length === 0);
+  const playersSubmittedVotes = signedUpPlayerIds.filter((pid) => !playersPendingVotes.includes(pid));
 
-
+  const notifyPendingVoters = async () => {
+    if (!isHost) return;
+    if (!playersPendingVotes.length) {
+      toast.success('Everyone has already submitted post-game votes.');
+      return;
+    }
+    try {
+      await Promise.all(playersPendingVotes.map((pid) => createNotification({
+        userId: pid,
+        type: 'game_reminder',
+        relatedGameId: game.id,
+        relatedUserId: user?.id,
+        message: `You still need to submit your post-game votes for ${game.title}.`,
+      })));
+      toast.success('Reminder sent to pending voters.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to notify pending voters.';
+      toast.error(message);
+    }
+  };
 
   const openProfile = (userId: string) => {
     navigate(`/profile/${userId}`);
@@ -460,6 +483,43 @@ export default function GameDetail() {
           </section>
         )}
 
+        {isFinished && (
+          <section className="glass-card p-4 animate-fade-in" style={{ animationDelay: '190ms' }}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground mb-2">POST-GAME VOTE STATUS</h3>
+                <p className="text-sm text-foreground">
+                  {playersSubmittedVotes.length} of {signedUpPlayerIds.length} players submitted their votes.
+                </p>
+              </div>
+              {isHost && playersPendingVotes.length > 0 ? (
+                <Button variant="outline" size="sm" className="gap-2" onClick={notifyPendingVoters}>
+                  <BellRing className="w-4 h-4" />
+                  Remind pending players
+                </Button>
+              ) : null}
+            </div>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              {signedUpPlayerIds.map((pid) => {
+                const player = (game.players ?? []).find((p) => p.id === pid);
+                const submitted = !playersPendingVotes.includes(pid);
+                return (
+                  <div key={pid} className="rounded-xl border border-border/50 bg-secondary/30 px-3 py-2 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{player?.username ?? 'Player'}</div>
+                      <div className="text-xs text-muted-foreground">{submitted ? 'Votes submitted' : 'Still needs to vote'}</div>
+                    </div>
+                    <span className={cn('rounded-full px-2 py-1 text-xs font-medium', submitted ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600')}>
+                      {submitted ? 'Done' : 'Pending'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {game.description && (
           <section className="animate-fade-in" style={{ animationDelay: '200ms' }}>
             <h3 className="text-sm font-semibold text-muted-foreground mb-2">ABOUT THIS GAME</h3>
@@ -517,7 +577,7 @@ export default function GameDetail() {
               </Button>
             )}
 
-            {(isHost || isJoined) && user && (
+            {!isFinished && (isHost || isJoined) && user && (
               <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
                 <DialogTrigger asChild>
                   <Button variant="secondary" className="w-full">
@@ -620,7 +680,7 @@ export default function GameDetail() {
               </Dialog>
             )}
 
-            {isHost && user && (
+            {!isFinished && isHost && user && (
               <Dialog open={squadInviteOpen} onOpenChange={setSquadInviteOpen}>
                 <DialogTrigger asChild>
                   <Button variant="secondary" className="w-full">
@@ -687,7 +747,13 @@ export default function GameDetail() {
               </Dialog>
             )}
 
-            {isHost ? (
+            {isFinished ? (
+              isJoined || isHost ? (
+                <Button variant="outline" className="w-full" onClick={() => navigate(`/game/${game.id}/postgame`)}>
+                  View Post-Game Votes
+                </Button>
+              ) : null
+            ) : isHost ? (
               <div className="flex gap-3">
                 <Button variant="outline" className="flex-1" onClick={() => navigate(`/game/${id}/edit`)}>
                   Edit Game

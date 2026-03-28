@@ -20,6 +20,8 @@ export default function MapView() {
   const [showFilters, setShowFilters] = useState(false);
   const [skillFilter, setSkillFilter] = useState<SkillLevel | 'all'>('all');
   const [privacyFilter, setPrivacyFilter] = useState<'all' | 'public' | 'private'>('all');
+  const [visibleGameCount, setVisibleGameCount] = useState(0);
+  const [recenterToken, setRecenterToken] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -109,11 +111,13 @@ export default function MapView() {
               selectedGame={selectedGame}
               onGameSelect={setSelectedGame}
               center={center}
+              onVisibleGamesChange={setVisibleGameCount}
+              recenterToken={recenterToken}
             />
 
             <button
               onClick={() => {
-                void getBrowserLocation().then(setCenter).catch(() => undefined);
+                void getBrowserLocation().then((loc) => { setCenter(loc); setRecenterToken((v) => v + 1); }).catch(() => undefined);
               }}
               className="absolute bottom-32 right-4 p-3 bg-card rounded-xl shadow-card border border-border/50 z-30"
               aria-label="Locate me"
@@ -123,7 +127,7 @@ export default function MapView() {
 
             <div className="absolute bottom-32 left-4 glass-card px-4 py-2 z-30">
               <p className="text-sm">
-                <span className="font-bold text-primary">{filteredGames.length}</span>
+                <span className="font-bold text-primary">{visibleGameCount}</span>
                 <span className="text-muted-foreground"> games nearby</span>
               </p>
             </div>

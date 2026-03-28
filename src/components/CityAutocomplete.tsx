@@ -6,8 +6,8 @@ import { useJsApiLoader } from '@react-google-maps/api';
 
 export function CityAutocomplete({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder?: string }) {
   const { isLoaded } = useJsApiLoader({
-    id: GOOGLE_MAPS_LOADER_ID + '-city-input',
-    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+    id: GOOGLE_MAPS_LOADER_ID,
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY || '',
     libraries: GOOGLE_MAPS_LIBRARIES,
     language: GOOGLE_MAPS_LANGUAGE,
     region: GOOGLE_MAPS_REGION,

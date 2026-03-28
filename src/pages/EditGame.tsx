@@ -10,7 +10,7 @@ import { SportGrid } from '@/components/SportSelector';
 import { NumberStepper } from '@/components/NumberStepper';
 import { LocationPicker } from '@/components/LocationPicker';
 import { ArrowLeft } from 'lucide-react';
-import { Sport, SkillLevel, SKILL_LEVELS } from '@/types';
+import { Sport, SkillLevel, SKILL_LEVELS, type Game } from '@/types';
 import { toast } from 'sonner';
 import { updateGame } from '@/lib/gamesApi';
 
@@ -30,12 +30,42 @@ function dateToInputs(d: Date) {
   };
 }
 
+const FALLBACK_GAME: Pick<Game, 'sport' | 'title' | 'description' | 'dateTime' | 'duration' | 'skillRequirement' | 'maxPlayers' | 'isPrivate' | 'location' | 'hostId'> = {
+  sport: 'basketball',
+  title: '',
+  description: '',
+  dateTime: new Date(),
+  duration: 90,
+  skillRequirement: 'intermediate',
+  maxPlayers: 10,
+  isPrivate: false,
+  location: {
+    latitude: 33.6846,
+    longitude: -117.8265,
+    areaName: '',
+  },
+  hostId: '',
+};
+
 export default function EditGame() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user, games, setGames } = useApp();
 
-  const game = useMemo(() => games.find(g => g.id === id), [games, id]);
+  const game = useMemo(() => games.find((g) => g.id === id), [games, id]);
+  const formGame = game ?? FALLBACK_GAME;
+  const initialDT = dateToInputs(formGame.dateTime);
+
+  const [sport, setSport] = useState<Sport[]>([formGame.sport]);
+  const [title, setTitle] = useState(formGame.title);
+  const [description, setDescription] = useState(formGame.description ?? '');
+  const [date, setDate] = useState(initialDT.date);
+  const [time, setTime] = useState(initialDT.time);
+  const [duration, setDuration] = useState(String(formGame.duration ?? 90));
+  const [skillLevel, setSkillLevel] = useState<SkillLevel>(formGame.skillRequirement ?? 'intermediate');
+  const [maxPlayers, setMaxPlayers] = useState<number>(formGame.maxPlayers ?? 10);
+  const [isPrivate, setIsPrivate] = useState<boolean>(!!formGame.isPrivate);
+  const [location, setLocation] = useState(formGame.location);
 
   if (!game) {
     return (
@@ -72,19 +102,6 @@ export default function EditGame() {
     );
   }
 
-  const initialDT = dateToInputs(game.dateTime);
-
-  const [sport, setSport] = useState<Sport[]>([game.sport]);
-  const [title, setTitle] = useState(game.title);
-  const [description, setDescription] = useState(game.description ?? '');
-  const [date, setDate] = useState(initialDT.date);
-  const [time, setTime] = useState(initialDT.time);
-  const [duration, setDuration] = useState(String(game.duration ?? 90));
-  const [skillLevel, setSkillLevel] = useState<SkillLevel>(game.skillRequirement ?? 'intermediate');
-  const [maxPlayers, setMaxPlayers] = useState<number>(game.maxPlayers ?? 10);
-  const [isPrivate, setIsPrivate] = useState<boolean>(!!game.isPrivate);
-  const [location, setLocation] = useState(game.location);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -111,7 +128,7 @@ export default function EditGame() {
         location,
       });
 
-      setGames(games.map(g => (g.id === game.id ? { ...g, ...updated } : g)));
+      setGames(games.map((g) => (g.id === game.id ? { ...g, ...updated } : g)));
       toast.success('Game updated.');
       navigate(`/game/${game.id}`);
     } catch (err) {
@@ -179,8 +196,8 @@ export default function EditGame() {
                   </SelectTrigger>
                   <SelectContent>
                     {SKILL_LEVELS.map((lvl) => (
-                      <SelectItem key={lvl} value={lvl}>
-                        {lvl}
+                      <SelectItem key={lvl.id ?? lvl} value={lvl.id ?? lvl}>
+                        {lvl.name ?? lvl}
                       </SelectItem>
                     ))}
                   </SelectContent>

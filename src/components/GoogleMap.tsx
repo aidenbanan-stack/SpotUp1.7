@@ -11,6 +11,8 @@ interface GoogleMapProps {
   selectedGame: Game | null;
   onGameSelect: (game: Game | null) => void;
   center?: { lat: number; lng: number };
+  onVisibleGamesChange?: (count: number) => void;
+  recenterToken?: number;
 }
 
 const mapContainerStyle = {
@@ -58,7 +60,7 @@ function sportEmoji(sport: string) {
   return SPORTS.find((s) => s.id === (sport as any))?.icon ?? '📍';
 }
 
-export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleMapProps) {
+export function GoogleMap({ games, selectedGame, onGameSelect, center, onVisibleGamesChange, recenterToken }: GoogleMapProps) {
   // If the key is missing, do not attempt to load Maps (prevents runtime/deploy errors).
   if (!hasGoogleMapsKey) {
     return (
@@ -118,6 +120,28 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleM
     setMap(null);
   }, []);
 
+  const reportVisibleGames = useCallback(() => {
+    if (!map || !onVisibleGamesChange) return;
+    const bounds = map.getBounds();
+    if (!bounds) {
+      onVisibleGamesChange(games.length);
+      return;
+    }
+    const visible = games.filter((game) => bounds.contains({ lat: game.location.latitude, lng: game.location.longitude }));
+    onVisibleGamesChange(visible.length);
+  }, [games, map, onVisibleGamesChange]);
+
+  useEffect(() => {
+    reportVisibleGames();
+  }, [reportVisibleGames]);
+
+  useEffect(() => {
+    if (!map || !myLocation) return;
+    if (typeof recenterToken !== 'number') return;
+    map.panTo(myLocation);
+    if ((map.getZoom() ?? 0) < 13) map.setZoom(13);
+  }, [map, myLocation, recenterToken]);
+
   if (loadError) {
     return (
       <div className="flex items-center justify-center h-full bg-secondary/30">
@@ -151,6 +175,9 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center }: GoogleM
         gestureHandling: 'greedy',
       }}
       onClick={() => onGameSelect(null)}
+      onIdle={reportVisibleGames}
+      onZoomChanged={reportVisibleGames}
+      onDragEnd={reportVisibleGames}
     >
       {myLocation ? (
         <Marker

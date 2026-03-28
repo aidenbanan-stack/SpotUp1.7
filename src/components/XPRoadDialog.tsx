@@ -45,13 +45,13 @@ const ROAD_BOTTOM_PADDING = 72;
 const ROAD_MAX_XP = 11000;
 const TIER_CARD_HEIGHT = 94;
 const TIER_SECTION_HEIGHT = 320;
-const ROOKIE_CARD_OFFSET = 64;
+const ROOKIE_CARD_OFFSET = 96;
 const MARKER_CLUSTER_GAP = 34;
 
 function xpForSport(user: User, sport: SportFilter): number {
   if (sport === 'all') return user.xp;
   if (user.primarySport === sport) return user.xp;
-  if (user.secondarySports.includes(sport)) return Math.round(user.xp * 0.6);
+  if (Array.isArray(user.secondarySports) && user.secondarySports.includes(sport)) return Math.round(user.xp * 0.6);
   return 0;
 }
 
@@ -534,7 +534,7 @@ export function XPRoadDialog({
                           </div>
                           {isGrouped && (
                             <div className="ml-2 flex h-7 min-w-7 items-center justify-center rounded-full bg-secondary px-2 text-xs font-semibold">
-                              +{cluster.users.length - 1}
+                              +{Math.max(0, cluster.users.length - 3)}
                             </div>
                           )}
                         </div>
