@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, CalendarDays, MapPin, Plus, Search, ShieldCheck, Sparkles, Swords, Trophy, Users } from 'lucide-react';
+import { ArrowLeft, CalendarDays, MapPin, Plus, Search, ShieldCheck, Sparkles, Swords, Trophy, Users, X } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import type { Sport } from '@/types';
 import { SPORTS } from '@/types';
@@ -115,10 +115,18 @@ export default function Squads() {
   const [resultWinnerSquadId, setResultWinnerSquadId] = useState('');
   const [resultPoints, setResultPoints] = useState('10');
   const [resultNotes, setResultNotes] = useState('');
+  const [lockDismissed, setLockDismissed] = useState(false);
 
   const joinUnlocked = (user?.xp ?? 0) >= 500;
   const createUnlocked = (user?.xp ?? 0) >= 500;
   const cityLabel = user?.city?.trim() || 'your area';
+
+  useEffect(() => {
+    if (!user?.id) return;
+    setLockDismissed(window.localStorage.getItem(`spotup_squads_lock_dismissed_${user.id}`) === '1');
+  }, [user?.id]);
+
+  const showLockedPage = !joinUnlocked && !(user?.isAdmin && lockDismissed);
 
   const sportIcon = (sport: Sport | null) => sport ? (SPORTS.find((s) => s.id === sport)?.icon ?? '🏀') : '👥';
   const sportLabel = (sport: Sport | null) => sport ? (SPORTS.find((s) => s.id === sport)?.name ?? sport) : 'Any sport';
@@ -528,25 +536,18 @@ export default function Squads() {
           ) : null}
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-          <div className="rounded-xl bg-secondary/40 p-2">
-            <div className="text-muted-foreground">Members</div>
-            <div className="font-semibold">{squad.member_count}/{Number(squad.member_limit ?? 10)}</div>
-          </div>
-          <div className="rounded-xl bg-secondary/40 p-2">
-            <div className="text-muted-foreground">Record</div>
-            <div className="font-semibold">{Number(squad.wins ?? 0)}-{Number(squad.losses ?? 0)}</div>
-          </div>
-          <div className="rounded-xl bg-secondary/40 p-2">
-            <div className="text-muted-foreground">Join gate</div>
-            <div className="font-semibold">{Number(squad.min_xp_required ?? 0)} XP</div>
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          {squad.home_area ? <span className="inline-flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {squad.home_area}</span> : null}
-          <span className="inline-flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5" /> {Number(squad.reliability_min ?? 90)}% reliability</span>
-          <span className="inline-flex items-center gap-1"><Trophy className="w-3.5 h-3.5" /> {Number(squad.points ?? 0)} pts</span>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1 rounded-full bg-secondary/50 px-2.5 py-1">
+            <Users className="w-3.5 h-3.5" /> {squad.member_count}/{Number(squad.member_limit ?? 10)}
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-secondary/50 px-2.5 py-1">
+            <Trophy className="w-3.5 h-3.5" /> {Number(squad.wins ?? 0)}-{Number(squad.losses ?? 0)}
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-secondary/50 px-2.5 py-1">
+            {Number(squad.min_xp_required ?? 0)} XP min
+          </span>
+          {squad.home_area ? <span className="inline-flex items-center gap-1 rounded-full bg-secondary/50 px-2.5 py-1"><MapPin className="w-3.5 h-3.5" /> {squad.home_area}</span> : null}
+          <span className="inline-flex items-center gap-1 rounded-full bg-secondary/50 px-2.5 py-1"><ShieldCheck className="w-3.5 h-3.5" /> {Number(squad.reliability_min ?? 90)}%</span>
         </div>
 
         {squad.description ? <p className="text-sm text-muted-foreground mt-3 line-clamp-2">{squad.description}</p> : null}
@@ -570,26 +571,43 @@ export default function Squads() {
       </div>
 
       <div className="max-w-6xl mx-auto p-4 space-y-4">
-        <div className="grid gap-4 md:grid-cols-4">
-          <div className="glass-card p-4">
-            <div className="text-sm text-muted-foreground">Unlock status</div>
-            <div className="text-2xl font-bold mt-1">{user?.xp?.toLocaleString() ?? 0} XP</div>
-            <div className="text-sm mt-2">Squads unlock at 500 XP. You can currently {createUnlocked ? 'create and join squads.' : 'keep earning XP to unlock squads.'}</div>
+        {showLockedPage ? (
+          <div className="glass-card p-6 md:p-8 relative overflow-hidden">
+            {user?.isAdmin ? (
+              <button
+                type="button"
+                className="absolute top-4 right-4 rounded-full bg-secondary/70 p-2"
+                onClick={() => {
+                  setLockDismissed(true);
+                  if (user?.id) window.localStorage.setItem(`spotup_squads_lock_dismissed_${user.id}`, '1');
+                }}
+                aria-label="Dismiss squads lock page"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            ) : null}
+            <div className="max-w-xl">
+              <div className="text-sm font-medium text-primary">Squads locked</div>
+              <div className="text-3xl font-bold mt-2">Reach 500 XP to unlock squads</div>
+              <p className="text-muted-foreground mt-3">Once you hit 500 XP, this page unlocks automatically and you can create or join squads.</p>
+              <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-secondary/60 px-4 py-2 text-sm font-medium">
+                Current XP: {user?.xp?.toLocaleString() ?? 0} / 500
+              </div>
+            </div>
           </div>
-          <div className="glass-card p-4">
-            <div className="text-sm text-muted-foreground">Nearby recruiting</div>
-            <div className="text-2xl font-bold mt-1">{areaSquads.length}</div>
-            <div className="text-sm mt-2">Recruiting squads around {cityLabel}.</div>
+        ) : (
+          <div className="space-y-4">
+        <div className="glass-card p-4 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="text-sm text-muted-foreground">Squads</div>
+            <div className="text-sm">Cleaner team spaces, simpler discovery, and one place for squad game activity.</div>
           </div>
-          <div className="glass-card p-4">
-            <div className="text-sm text-muted-foreground">Pending invites</div>
-            <div className="text-2xl font-bold mt-1">{loadingInvites ? '...' : pendingInvites.length}</div>
-            <div className="text-sm mt-2">Captains can invite you directly into squads.</div>
-          </div>
-          <div className="glass-card p-4">
-            <div className="text-sm text-muted-foreground">Open matchup board</div>
-            <div className="text-2xl font-bold mt-1">{loadingCompetition ? '...' : openBoardPosts.length}</div>
-            <div className="text-sm mt-2">Post squad matchups, challenge nearby squads, and handle all squad game invites here.</div>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
+            <span>{areaSquads.length} near {cityLabel}</span>
+            <span>•</span>
+            <span>{loadingInvites ? '...' : pendingInvites.length} invites</span>
+            <span>•</span>
+            <span>{loadingCompetition ? '...' : openBoardPosts.length} open posts</span>
           </div>
         </div>
 
@@ -836,6 +854,8 @@ export default function Squads() {
             </div>
           </div>
         )}
+          </div>
+        )}
       </div>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -847,18 +867,10 @@ export default function Squads() {
             <div className="space-y-2"><Label>Visibility</Label><Select value={newVisibility} onValueChange={(value) => setNewVisibility(value as 'public' | 'request' | 'invite_only')}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="public">Public</SelectItem><SelectItem value="request">Request to join</SelectItem><SelectItem value="invite_only">Invite only</SelectItem></SelectContent></Select></div>
             <div className="space-y-2 md:col-span-2"><Label>Description</Label><Textarea value={newDescription} onChange={(e) => setNewDescription(e.target.value)} rows={3} placeholder="What kind of players are you building around?" /></div>
             <div className="space-y-2"><Label>Home court</Label><Input value={newHomeCourt} onChange={(e) => setNewHomeCourt(e.target.value)} placeholder="Founders Park" /></div>
-            <div className="space-y-2"><Label>Motto</Label><Input value={newMotto} onChange={(e) => setNewMotto(e.target.value)} placeholder="Fast, reliable, team first" /></div>
             <div className="space-y-2"><Label>Member limit</Label><Input type="number" value={newMemberLimit} onChange={(e) => setNewMemberLimit(e.target.value)} /></div>
             <div className="space-y-2"><Label>Minimum XP</Label><Input type="number" value={minJoinXp} onChange={(e) => setMinJoinXp(e.target.value)} /></div>
             <div className="space-y-2"><Label>Reliability minimum</Label><Input type="number" value={newReliabilityMin} onChange={(e) => setNewReliabilityMin(e.target.value)} /></div>
-            <div className="space-y-2"><Label>Primary color</Label><Input type="color" value={newPrimaryColor} onChange={(e) => setNewPrimaryColor(e.target.value)} /></div>
-            <div className="space-y-2"><Label>Secondary color</Label><Input type="color" value={newSecondaryColor} onChange={(e) => setNewSecondaryColor(e.target.value)} /></div>
             <div className="space-y-2 md:col-span-2"><Label>Vibe</Label><Select value={newVibe} onValueChange={(value) => setNewVibe(value as 'casual' | 'competitive' | 'balanced')}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="casual">Casual</SelectItem><SelectItem value="balanced">Balanced</SelectItem><SelectItem value="competitive">Competitive</SelectItem></SelectContent></Select></div>
-            <div className="space-y-2 md:col-span-2"><Label>Tags</Label><Input value={newTags} onChange={(e) => setNewTags(e.target.value)} /></div>
-            <div className="space-y-2 md:col-span-2"><Label>Preferred days</Label><Input value={newPreferredDays} onChange={(e) => setNewPreferredDays(e.target.value)} /></div>
-            <div className="space-y-2 md:col-span-2"><Label>Skill focus</Label><Input value={newSkillFocus} onChange={(e) => setNewSkillFocus(e.target.value)} /></div>
-            <div className="space-y-2 md:col-span-2"><Label>Rules</Label><Textarea value={newRules} onChange={(e) => setNewRules(e.target.value)} rows={4} /></div>
-            <div className="space-y-2 md:col-span-2"><Label>Join questions</Label><Textarea value={newQuestions} onChange={(e) => setNewQuestions(e.target.value)} rows={3} /></div>
             <div className="rounded-xl border p-3 md:col-span-2 flex items-center justify-between">
               <div>
                 <div className="font-medium">Recruiting open</div>

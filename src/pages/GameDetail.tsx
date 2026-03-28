@@ -83,6 +83,17 @@ export default function GameDetail() {
   const isLive = game.status === 'live';
   const isFinished = game.status === 'finished';
 
+  const minXpGate = Number(game.hostMinXpRequired ?? 0);
+  const proOnlyGate = Boolean(game.hostProOnly);
+  const ageMinGate = game.hostAgeMin ?? null;
+  const ageMaxGate = game.hostAgeMax ?? null;
+  const belowXpGate = !isHost && minXpGate > 0 && (user?.xp ?? 0) < minXpGate;
+  const blockedByProGate = !isHost && proOnlyGate && !user?.isPro;
+  const missingAge = !isHost && (ageMinGate != null || ageMaxGate != null) && !(typeof user?.age === 'number' && Number.isFinite(user.age));
+  const belowAgeGate = !isHost && ageMinGate != null && typeof user?.age === 'number' && user.age < ageMinGate;
+  const aboveAgeGate = !isHost && ageMaxGate != null && typeof user?.age === 'number' && user.age > ageMaxGate;
+  const blockedByFilters = belowXpGate || blockedByProGate || missingAge || belowAgeGate || aboveAgeGate;
+
   const canViewLive = (isHost || isJoined) && isLive;
 
 
@@ -162,6 +173,13 @@ export default function GameDetail() {
       return;
     }
     if (isJoined || isPending) return;
+    if (blockedByFilters) {
+      if (belowXpGate) toast.error(`This host requires at least ${minXpGate} XP to join.`);
+      else if (blockedByProGate) toast.error('This host restricted the game to SpotUp Pro players only.');
+      else if (missingAge) toast.error('Add your age to your profile to join this game.');
+      else if (belowAgeGate || aboveAgeGate) toast.error(`This host set an age range of ${ageMinGate ?? '?'}-${ageMaxGate ?? '?'}.`);
+      return;
+    }
 
     try {
       const updated = await joinGame(game.id, user.id, game.isPrivate);
@@ -320,6 +338,28 @@ export default function GameDetail() {
                 You're hosting
               </span>
             )}
+          </section>
+        )}
+
+        {(minXpGate > 0 || proOnlyGate || ageMinGate != null || ageMaxGate != null) && (
+          <section className="glass-card p-4 animate-fade-in" style={{ animationDelay: '80ms' }}>
+            <div className="text-sm font-semibold mb-3">Host join filters</div>
+            <div className="flex flex-wrap gap-2">
+              {minXpGate > 0 ? <span className="px-3 py-1 rounded-full text-xs bg-secondary/70">Min {minXpGate} XP</span> : null}
+              {proOnlyGate ? <span className="px-3 py-1 rounded-full text-xs bg-secondary/70">Pro only</span> : null}
+              {ageMinGate != null || ageMaxGate != null ? <span className="px-3 py-1 rounded-full text-xs bg-secondary/70">Ages {ageMinGate ?? 0}-{ageMaxGate ?? 'Any'}</span> : null}
+            </div>
+            {blockedByFilters ? (
+              <p className="text-sm text-muted-foreground mt-3">
+                {belowXpGate
+                  ? `You need at least ${minXpGate} XP to join this game.`
+                  : blockedByProGate
+                    ? 'This host restricted the game to SpotUp Pro players.'
+                    : missingAge
+                      ? 'Add your age to your profile to join this game.'
+                      : `This game is limited to ages ${ageMinGate ?? 0}-${ageMaxGate ?? 'Any'}.`}
+              </p>
+            ) : null}
           </section>
         )}
 

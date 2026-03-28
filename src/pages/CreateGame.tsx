@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { SportGrid } from '@/components/SportSelector';
 import { NumberStepper } from '@/components/NumberStepper';
 import { LocationPicker } from '@/components/LocationPicker';
-import { ArrowLeft, Calendar, Clock, MapPin, Users } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, Crown, MapPin, Sparkles, Users } from 'lucide-react';
 import { Sport, SkillLevel, SKILL_LEVELS, Game } from '@/types';
 import { toast } from 'sonner';
 import { createGame } from '@/lib/gamesApi';
@@ -27,6 +27,11 @@ export default function CreateGame() {
   const [skillLevel, setSkillLevel] = useState<SkillLevel>('intermediate');
   const [maxPlayers, setMaxPlayers] = useState(10);
   const [isPrivate, setIsPrivate] = useState(false);
+  const [hostMinXpRequired, setHostMinXpRequired] = useState('0');
+  const [hostProOnly, setHostProOnly] = useState(false);
+  const [ageRestricted, setAgeRestricted] = useState(false);
+  const [hostAgeMin, setHostAgeMin] = useState('18');
+  const [hostAgeMax, setHostAgeMax] = useState('35');
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceCount, setRecurrenceCount] = useState(4);
   const [location, setLocation] = useState({
@@ -75,6 +80,10 @@ export default function CreateGame() {
       runsStarted: false,
       location,
       createdAt: new Date(),
+      hostMinXpRequired: Math.max(0, Number(hostMinXpRequired || '0')),
+      hostProOnly,
+      hostAgeMin: ageRestricted ? Math.max(0, Number(hostAgeMin || '0')) : null,
+      hostAgeMax: ageRestricted ? Math.max(0, Number(hostAgeMax || '0')) : null,
     };
 
     setGames([optimisticGame, ...prevGames]);
@@ -96,6 +105,10 @@ export default function CreateGame() {
         status: optimisticGame.status,
         checkedInIds: optimisticGame.checkedInIds,
         runsStarted: optimisticGame.runsStarted,
+        hostMinXpRequired: Math.max(0, Number(hostMinXpRequired || '0')),
+        hostProOnly,
+        hostAgeMin: ageRestricted ? Math.max(0, Number(hostAgeMin || '0')) : null,
+        hostAgeMax: ageRestricted ? Math.max(0, Number(hostAgeMax || '0')) : null,
         recurrenceCount: isRecurring ? recurrenceCount : 1,
         recurrenceIntervalDays: 7,
       });
@@ -260,6 +273,67 @@ export default function CreateGame() {
           {!user?.isPro ? (
             <p className="text-xs text-muted-foreground">SpotUp Pro unlocks private games.</p>
           ) : null}
+        </section>
+
+
+        <section className="glass-card p-4 space-y-4 animate-fade-in" style={{ animationDelay: '362ms' }}>
+          <div className="flex items-center gap-2">
+            <Crown className="w-4 h-4 text-primary" />
+            <div>
+              <h3 className="font-semibold text-foreground">SpotUp Pro host filters</h3>
+              <p className="text-sm text-muted-foreground">Set who can join your hosted game.</p>
+            </div>
+          </div>
+
+          {!user?.isPro ? (
+            <p className="text-xs text-muted-foreground">SpotUp Pro unlocks minimum XP filters, pro-only games, and age range filters.</p>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4" />
+                  Minimum XP required to join
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={hostMinXpRequired}
+                  onChange={(e) => setHostMinXpRequired(e.target.value)}
+                  className="bg-secondary border-border"
+                />
+              </div>
+
+              <div className="rounded-xl border p-3 flex items-center justify-between gap-4">
+                <div>
+                  <h4 className="font-medium text-foreground">Restrict to Pro players only</h4>
+                  <p className="text-sm text-muted-foreground">Only SpotUp Pro members can join.</p>
+                </div>
+                <Switch checked={hostProOnly} onCheckedChange={setHostProOnly} />
+              </div>
+
+              <div className="rounded-xl border p-3 space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h4 className="font-medium text-foreground">Age range filter</h4>
+                    <p className="text-sm text-muted-foreground">Only players inside the selected age range can join.</p>
+                  </div>
+                  <Switch checked={ageRestricted} onCheckedChange={setAgeRestricted} />
+                </div>
+                {ageRestricted ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm font-medium text-muted-foreground mb-2 block">Minimum age</label>
+                      <Input type="number" min={0} value={hostAgeMin} onChange={(e) => setHostAgeMin(e.target.value)} className="bg-secondary border-border" />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-muted-foreground mb-2 block">Maximum age</label>
+                      <Input type="number" min={0} value={hostAgeMax} onChange={(e) => setHostAgeMax(e.target.value)} className="bg-secondary border-border" />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="glass-card p-4 space-y-4 animate-fade-in" style={{ animationDelay: '375ms' }}>

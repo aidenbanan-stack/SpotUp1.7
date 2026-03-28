@@ -27,6 +27,10 @@ export type GameRow = {
   location_longitude: number;
   location_area_name: string;
   created_at: string;
+  host_min_xp_required?: number | null;
+  host_pro_only?: boolean | null;
+  host_age_min?: number | null;
+  host_age_max?: number | null;
 };
 
 function rowToGame(row: GameRow): Game {
@@ -57,6 +61,10 @@ function rowToGame(row: GameRow): Game {
       areaName: row.location_area_name,
     },
     createdAt: new Date(row.created_at),
+    hostMinXpRequired: Number(row.host_min_xp_required ?? 0),
+    hostProOnly: Boolean(row.host_pro_only),
+    hostAgeMin: row.host_age_min != null ? Number(row.host_age_min) : null,
+    hostAgeMax: row.host_age_max != null ? Number(row.host_age_max) : null,
   };
 }
 
@@ -149,6 +157,10 @@ export async function createGame(input: CreateGameInput): Promise<Game> {
     p_location_latitude: input.location.latitude,
     p_location_longitude: input.location.longitude,
     p_location_area_name: input.location.areaName,
+    p_host_min_xp_required: Math.max(0, Number(input.hostMinXpRequired ?? 0)),
+    p_host_pro_only: Boolean(input.hostProOnly),
+    p_host_age_min: input.hostAgeMin ?? null,
+    p_host_age_max: input.hostAgeMax ?? null,
     p_recurrence_count: Math.max(1, Number(input.recurrenceCount ?? 1)),
     p_recurrence_interval_days: Math.max(1, Number(input.recurrenceIntervalDays ?? 7)),
   };

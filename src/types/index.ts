@@ -160,6 +160,10 @@ export interface Game {
   };
   createdAt: Date;
   completedAt?: Date;
+  hostMinXpRequired?: number;
+  hostProOnly?: boolean;
+  hostAgeMin?: number | null;
+  hostAgeMax?: number | null;
 }
 
 export interface Notification {
