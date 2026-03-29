@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { SportGrid } from '@/components/SportSelector';
 import { LocationPicker } from '@/components/LocationPicker';
+import { NumberStepper } from '@/components/NumberStepper';
 import { ArrowLeft, Calendar, Check, Clock, Crown, MapPin, Sparkles, Users } from 'lucide-react';
 import { Sport, SkillLevel, SKILL_LEVELS, Game } from '@/types';
 import { toast } from 'sonner';

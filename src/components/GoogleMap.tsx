@@ -60,8 +60,36 @@ function sportEmoji(sport: string) {
   return SPORTS.find((s) => s.id === (sport as any))?.icon ?? '📍';
 }
 
+function buildMarkerGames(games: Game[]) {
+  const groups = new Map<string, Game[]>();
+
+  for (const game of games) {
+    const key = `${game.location.latitude.toFixed(6)},${game.location.longitude.toFixed(6)}`;
+    const current = groups.get(key) ?? [];
+    current.push(game);
+    groups.set(key, current);
+  }
+
+  return Array.from(groups.values()).flatMap((group) => {
+    if (group.length === 1) {
+      return [{ game: group[0], position: { lat: group[0].location.latitude, lng: group[0].location.longitude } }];
+    }
+
+    const radius = 0.00007;
+    return group.map((game, index) => {
+      const angle = (Math.PI * 2 * index) / group.length - Math.PI / 2;
+      return {
+        game,
+        position: {
+          lat: game.location.latitude + Math.sin(angle) * radius,
+          lng: game.location.longitude + Math.cos(angle) * radius,
+        },
+      };
+    });
+  });
+}
+
 export function GoogleMap({ games, selectedGame, onGameSelect, center, onVisibleGamesChange, recenterToken }: GoogleMapProps) {
-  // If the key is missing, do not attempt to load Maps (prevents runtime/deploy errors).
   if (!hasGoogleMapsKey) {
     return (
       <div className="flex items-center justify-center h-full bg-secondary/30">
@@ -81,10 +109,10 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center, onVisible
   });
 
   const [map, setMap] = useState<google.maps.Map | null>(null);
-
   const [resolvedCenter, setResolvedCenter] = useState<LatLng>(center ?? defaultCenter);
   const [myLocation, setMyLocation] = useState<LatLng | null>(center ?? null);
   const hasCenterProp = useMemo(() => !!center, [center]);
+  const markerGames = useMemo(() => buildMarkerGames(games), [games]);
 
   useEffect(() => {
     if (center) {
@@ -94,7 +122,6 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center, onVisible
   }, [center?.lat, center?.lng]);
 
   useEffect(() => {
-    // If the parent did not provide a center, try to start at the user's location.
     if (hasCenterProp) return;
 
     let cancelled = false;
@@ -110,7 +137,6 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center, onVisible
       cancelled = true;
     };
   }, [hasCenterProp]);
-
 
   const onLoad = useCallback((map: google.maps.Map) => {
     setMap(map);
@@ -194,37 +220,28 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center, onVisible
         />
       ) : null}
 
-      {games.map((game) => {
-        const position = {
-          lat: game.location.latitude,
-          lng: game.location.longitude,
-        };
-
-        return (
-          <Marker
-            key={game.id}
-            position={position}
-            onClick={() => onGameSelect(game)}
-            icon={{
-              path: google.maps.SymbolPath.CIRCLE,
-              // Slightly larger marker so it is easier to tap on mobile.
-              scale: 16,
-              fillColor: sportColors[game.sport] || '#E50914',
-              fillOpacity: 1,
-              strokeColor: '#ffffff',
-              strokeWeight: 2,
-              // Center the label within the circle.
-              labelOrigin: new google.maps.Point(0, 0),
-            }}
-            label={{
-              text: sportEmoji(game.sport),
-              color: '#ffffff',
-              fontSize: '16px',
-              fontWeight: '700',
-            }}
-          />
-        );
-      })}
+      {markerGames.map(({ game, position }) => (
+        <Marker
+          key={game.id}
+          position={position}
+          onClick={() => onGameSelect(game)}
+          icon={{
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 16,
+            fillColor: sportColors[game.sport] || '#E50914',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2,
+            labelOrigin: new google.maps.Point(0, 0),
+          }}
+          label={{
+            text: sportEmoji(game.sport),
+            color: '#ffffff',
+            fontSize: '16px',
+            fontWeight: '700',
+          }}
+        />
+      ))}
 
       {selectedGame && (
         <InfoWindow
@@ -239,7 +256,7 @@ export function GoogleMap({ games, selectedGame, onGameSelect, center, onVisible
               <span className="font-semibold text-sm">{selectedGame.title}</span>
               {selectedGame.isPrivate && <Lock className="w-3 h-3" />}
             </div>
-            <p className="text-xs text-muted-foreground capitalize">{selectedGame.sport.replace('-', ' ')}</p>
+            <p className="text-xs text-muted-foreground capitalize">{selectedGame.sport.replace('-', ' ' )}</p>
           </div>
         </InfoWindow>
       )}

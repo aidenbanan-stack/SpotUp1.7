@@ -14,7 +14,7 @@ import { shouldShowGameOnMap } from '@/lib/gameVisibility';
 
 export default function MapView() {
   const navigate = useNavigate();
-  const { user, selectedSport, setSelectedSport, games } = useApp();
+  const { user, selectedSport, setSelectedSport, games, refreshGames } = useApp();
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const [center, setCenter] = useState<LatLng | undefined>(undefined);
   const [showFilters, setShowFilters] = useState(false);
@@ -22,6 +22,7 @@ export default function MapView() {
   const [privacyFilter, setPrivacyFilter] = useState<'all' | 'public' | 'private'>('all');
   const [visibleGameCount, setVisibleGameCount] = useState(0);
   const [recenterToken, setRecenterToken] = useState(0);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     let mounted = true;
@@ -35,7 +36,11 @@ export default function MapView() {
     };
   }, []);
 
-  const nowMs = Date.now();
+  useEffect(() => {
+    void refreshGames().catch(() => undefined);
+    const interval = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(interval);
+  }, [refreshGames]);
 
   const filteredGames = useMemo(() => {
     return games.filter((game) => {

@@ -12,41 +12,73 @@ export function CityAutocomplete({ value, onChange, placeholder }: { value: stri
     language: GOOGLE_MAPS_LANGUAGE,
     region: GOOGLE_MAPS_REGION,
   });
+
+  const [inputValue, setInputValue] = useState(value);
   const [predictions, setPredictions] = useState<google.maps.places.AutocompletePrediction[]>([]);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (!hasGoogleMapsKey || !isLoaded || !value.trim()) {
+    setInputValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    const query = inputValue.trim();
+
+    if (!hasGoogleMapsKey || !isLoaded || !open || !query || query === value.trim()) {
       setPredictions([]);
       return;
     }
+
     const service = new google.maps.places.AutocompleteService();
-    service.getPlacePredictions({ input: value, types: ['(cities)'] }, (results) => {
-      setPredictions(results ?? []);
-    });
-  }, [isLoaded, value]);
+    const timeout = window.setTimeout(() => {
+      service.getPlacePredictions({ input: query, types: ['(cities)'] }, (results) => {
+        setPredictions(results ?? []);
+      });
+    }, 180);
+
+    return () => window.clearTimeout(timeout);
+  }, [inputValue, isLoaded, open, value]);
 
   const uniquePredictions = useMemo(() => {
     const seen = new Set<string>();
-    return predictions.filter((prediction) => {
-      const key = prediction.description;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }).slice(0, 5);
+    return predictions
+      .filter((prediction) => {
+        const key = prediction.description;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 5);
   }, [predictions]);
 
   return (
     <div className="relative">
-      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
-      {uniquePredictions.length > 0 ? (
+      <Input
+        value={inputValue}
+        onChange={(e) => {
+          const nextValue = e.target.value;
+          setInputValue(nextValue);
+          onChange(nextValue);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => {
+          window.setTimeout(() => setOpen(false), 120);
+        }}
+        placeholder={placeholder}
+      />
+      {open && uniquePredictions.length > 0 ? (
         <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-2xl border border-border bg-background shadow-xl overflow-hidden">
           {uniquePredictions.map((prediction) => (
             <button
               key={prediction.place_id}
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 onChange(prediction.description);
+                setInputValue(prediction.description);
                 setPredictions([]);
+                setOpen(false);
               }}
               className="block w-full px-3 py-2 text-left text-sm hover:bg-secondary/60"
             >

@@ -41,11 +41,11 @@ type MarkerCluster = {
 };
 
 const ROAD_TOP_PADDING = 96;
-const ROAD_BOTTOM_PADDING = 72;
+const ROAD_BOTTOM_PADDING = 156;
 const ROAD_MAX_XP = 11000;
 const TIER_CARD_HEIGHT = 94;
 const TIER_SECTION_HEIGHT = 320;
-const ROOKIE_CARD_OFFSET = 96;
+const ROOKIE_CARD_OFFSET = 108;
 const MARKER_CLUSTER_GAP = 34;
 
 function xpForSport(user: User, sport: SportFilter): number {
@@ -121,11 +121,14 @@ function roadHeightForTierCount(tierCount: number) {
   return Math.max(0, (tierCount - 1) * TIER_SECTION_HEIGHT) + TIER_CARD_HEIGHT + ROAD_TOP_PADDING + ROAD_BOTTOM_PADDING;
 }
 
-function tierAnchorY(index: number, roadTiers: RoadTier[]) {
+function baseTierAnchorY(index: number, roadTiers: RoadTier[]) {
   const roadHeight = roadHeightForTierCount(roadTiers.length);
-  const rookieOffset = index === 0 ? ROOKIE_CARD_OFFSET : 0;
-  const roadBottom = roadHeight - ROAD_BOTTOM_PADDING - TIER_CARD_HEIGHT / 2 + rookieOffset;
+  const roadBottom = roadHeight - ROAD_BOTTOM_PADDING - TIER_CARD_HEIGHT / 2;
   return roadBottom - index * TIER_SECTION_HEIGHT;
+}
+
+function tierAnchorY(index: number, roadTiers: RoadTier[]) {
+  return baseTierAnchorY(index, roadTiers) + (index === 0 ? ROOKIE_CARD_OFFSET : 0);
 }
 
 function xpToY(xp: number, roadTiers: RoadTier[]) {
@@ -135,7 +138,7 @@ function xpToY(xp: number, roadTiers: RoadTier[]) {
   const tierMax = tier.maxXP ?? ROAD_MAX_XP;
   const span = Math.max(1, tierMax - tier.minXP);
   const progress = clamp01((clampedXP - tier.minXP) / span);
-  return tierAnchorY(tierIndex, roadTiers) - progress * TIER_SECTION_HEIGHT;
+  return baseTierAnchorY(tierIndex, roadTiers) - progress * TIER_SECTION_HEIGHT;
 }
 
 function buildTierAnchors(roadTiers: RoadTier[]) {

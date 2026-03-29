@@ -22,10 +22,12 @@ export function isAffiliatedWithGame(game: Game, userId?: string | null): boolea
 }
 
 export function shouldShowGameOnHome(game: Game, now = Date.now()): boolean {
+  if (game.status === 'finished') return false;
   return !isStaleScheduledGame(game, now);
 }
 
 export function shouldShowGameOnMap(game: Game, now = Date.now()): boolean {
+  if (game.status === 'finished') return false;
   return !isStaleScheduledGame(game, now);
 }
 

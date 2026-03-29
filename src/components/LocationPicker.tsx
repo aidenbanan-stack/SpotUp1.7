@@ -118,6 +118,7 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
           longitude: lng,
           areaName: address,
         });
+        setPredictions([]);
         setOpen(false);
       } catch {
         onChange({
@@ -125,6 +126,7 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
           longitude: lng,
           areaName: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
         });
+        setPredictions([]);
         setOpen(false);
       }
     },
@@ -182,6 +184,8 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
             !details?.geometry?.location
           ) {
             setSearchQuery(p.description);
+            setPredictions([]);
+            setOpen(false);
             return;
           }
 
