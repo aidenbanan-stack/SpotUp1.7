@@ -239,6 +239,51 @@ export interface TournamentMatch {
   games?: { team1Score: number; team2Score: number }[];
 }
 
+
+export type TournamentRegistrationStatus = 'pending' | 'registered' | 'checked_in' | 'eliminated' | 'withdrawn' | 'disqualified' | 'champion';
+export type TournamentEntryType = 'solo' | 'squad';
+export type TournamentMatchStatus = 'pending' | 'ready' | 'in_progress' | 'completed' | 'cancelled';
+export type TournamentBracketSide = 'main' | 'winners' | 'losers' | 'finals' | 'placement';
+
+export interface TournamentRegistrationDetail {
+  id: string;
+  tournamentId: string;
+  userId?: string;
+  squadId?: string;
+  entryType: TournamentEntryType;
+  displayName: string;
+  status: TournamentRegistrationStatus;
+  seed?: number;
+  checkedInAt?: Date;
+  eliminatedAt?: Date;
+  finalRank?: number;
+  createdAt: Date;
+}
+
+export interface TournamentBracketMatch {
+  id: string;
+  tournamentId: string;
+  roundNumber: number;
+  matchNumber: number;
+  bracketSide: TournamentBracketSide;
+  stageLabel?: string;
+  status: TournamentMatchStatus;
+  bestOf: number;
+  participant1RegistrationId?: string;
+  participant2RegistrationId?: string;
+  participant1Name?: string;
+  participant2Name?: string;
+  participant1Score?: number;
+  participant2Score?: number;
+  winnerRegistrationId?: string;
+  loserRegistrationId?: string;
+  nextMatchId?: string;
+  nextMatchSlot?: 1 | 2;
+  scheduledAt?: Date;
+  startedAt?: Date;
+  completedAt?: Date;
+}
+
 export interface Tournament {
   id: string;
   name: string;
