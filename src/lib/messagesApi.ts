@@ -38,12 +38,6 @@ async function requireMe() {
   return data.user;
 }
 
-function newConversationId(): string {
-  const c: any = globalThis.crypto as any;
-  if (c?.randomUUID) return c.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
 function cleanUsername(u: any, email?: any) {
   const s = typeof u === 'string' ? u.trim() : '';
   if (s) return s;
@@ -56,6 +50,32 @@ function cleanPhoto(url: any) {
   const s = typeof url === 'string' ? url.trim() : '';
   if (s) return s;
   return 'https://api.dicebear.com/7.x/avataaars/svg?seed=spotup';
+}
+
+function normalizePair(a: string, b: string): { user1: string; user2: string } {
+  return a < b ? { user1: a, user2: b } : { user1: b, user2: a };
+}
+
+function isDuplicateishError(error: any) {
+  const msg = String(error?.message ?? '').toLowerCase();
+  const code = String(error?.code ?? '');
+  return (
+    code === '23505' ||
+    code === '409' ||
+    msg.includes('duplicate') ||
+    msg.includes('unique') ||
+    msg.includes('already exists') ||
+    msg.includes('conflict')
+  );
+}
+
+function isRlsLikeError(error: any) {
+  const msg = String(error?.message ?? '').toLowerCase();
+  return (
+    msg.includes('row-level security') ||
+    msg.includes('permission denied') ||
+    msg.includes('not allowed')
+  );
 }
 
 /**
@@ -121,6 +141,77 @@ async function fetchPublicProfiles(ids: string[]) {
   return byId;
 }
 
+async function findSharedConversationId(meId: string, otherUserId: string): Promise<string | null> {
+  const { data: myMemberships, error: memErr } = await supabase
+    .from('conversation_members')
+    .select('conversation_id')
+    .eq('user_id', meId);
+
+  if (memErr || !Array.isArray(myMemberships) || myMemberships.length === 0) {
+    return null;
+  }
+
+  const candidateIds = Array.from(
+    new Set(myMemberships.map((row: any) => row.conversation_id).filter((id: any) => typeof id === 'string' && id.length > 0))
+  );
+  if (!candidateIds.length) return null;
+
+  const { data: shared, error: sharedErr } = await supabase
+    .from('conversation_members')
+    .select('conversation_id')
+    .eq('user_id', otherUserId)
+    .in('conversation_id', candidateIds)
+    .limit(1);
+
+  if (sharedErr || !Array.isArray(shared) || shared.length === 0) {
+    return null;
+  }
+
+  return String(shared[0].conversation_id);
+}
+
+async function ensureConversationMembers(conversationId: string, meId: string, otherUserId: string): Promise<void> {
+  const rows = [
+    { conversation_id: conversationId, user_id: meId },
+    { conversation_id: conversationId, user_id: otherUserId },
+  ];
+
+  for (const row of rows) {
+    const { error } = await supabase.from('conversation_members').upsert(row, {
+      onConflict: 'conversation_id,user_id',
+      ignoreDuplicates: true,
+    });
+
+    if (!error) continue;
+    if (isDuplicateishError(error) || isRlsLikeError(error)) continue;
+    throw error;
+  }
+}
+
+async function getOrCreateConversationViaRpc(otherUserId: string): Promise<string | null> {
+  try {
+    const { data, error } = await (supabase as any).rpc('get_or_create_direct_conversation', {
+      p_other_user_id: otherUserId,
+    });
+
+    if (error) {
+      const msg = String(error?.message ?? '').toLowerCase();
+      const code = String(error?.code ?? '');
+      const missingFunction = code === '42883' || msg.includes('function') || msg.includes('does not exist');
+      if (!missingFunction) {
+        console.warn('[Messages] get_or_create_direct_conversation RPC failed:', error);
+      }
+      return null;
+    }
+
+    if (typeof data === 'string' && data.length > 0) return data;
+    return null;
+  } catch (error) {
+    console.warn('[Messages] RPC conversation creation threw:', error);
+    return null;
+  }
+}
+
 export async function fetchMyMessageRequests(): Promise<MessageRequest[]> {
   const me = await requireMe();
 
@@ -173,17 +264,7 @@ export async function sendMessageRequest(toUserId: string, initialMessage: strin
     return;
   }
 
-  const msg = (error as any)?.message ?? '';
-  const code = (error as any)?.code ?? '';
-  if (
-    String(code) === '23505' ||
-    msg.toLowerCase().includes('duplicate') ||
-    msg.toLowerCase().includes('unique') ||
-    msg.toLowerCase().includes('already exists')
-  ) {
-    return;
-  }
-
+  if (isDuplicateishError(error)) return;
   throw error;
 }
 
@@ -241,7 +322,6 @@ export async function rejectMessageRequest(requestId: string): Promise<void> {
 export async function fetchMyConversations(): Promise<Conversation[]> {
   const me = await requireMe();
 
-  // First try membership table
   const { data: mems, error: memErr } = await supabase
     .from('conversation_members')
     .select('conversation_id')
@@ -249,7 +329,6 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
 
   let conversationIds = Array.from(new Set((mems ?? []).map((r: any) => r.conversation_id).filter(Boolean)));
 
-  // Fallback to conversations table if membership rows are missing/incomplete
   if (memErr || !conversationIds.length) {
     const { data: convs, error: convErr } = await supabase
       .from('conversations')
@@ -279,7 +358,6 @@ export async function fetchMyConversations(): Promise<Conversation[]> {
     });
   }
 
-  // Fallback: derive other user from conversations table
   const missingOtherConversationIds = conversationIds.filter((id) => !otherByConv[id]);
   if (missingOtherConversationIds.length > 0) {
     const { data: convs2, error: convErr2 } = await supabase
@@ -406,44 +484,26 @@ export async function sendGameInviteToUser(otherUserId: string, gameId: string, 
   }
 }
 
-function normalizePair(a: string, b: string): { user1: string; user2: string } {
-  return a < b ? { user1: a, user2: b } : { user1: b, user2: a };
-}
-
-async function ensureConversationMembers(conversationId: string, meId: string, otherUserId: string): Promise<void> {
-  // Insert one at a time so one duplicate row does not fail the whole operation.
-  const rows = [
-    { conversation_id: conversationId, user_id: meId },
-    { conversation_id: conversationId, user_id: otherUserId },
-  ];
-
-  for (const row of rows) {
-    const { error } = await supabase.from('conversation_members').insert(row);
-    if (!error) continue;
-
-    const msg = String((error as any)?.message ?? '').toLowerCase();
-    const code = String((error as any)?.code ?? '');
-
-    const ignorable =
-      code === '23505' ||
-      msg.includes('duplicate') ||
-      msg.includes('unique') ||
-      msg.includes('already exists') ||
-      msg.includes('row-level security') ||
-      msg.includes('permission denied');
-
-    if (!ignorable) {
-      throw error;
-    }
-  }
-}
-
 export async function getOrCreateConversationWithUser(otherUserId: string): Promise<string> {
   const me = await requireMe();
+  if (!otherUserId) throw new Error('Missing recipient.');
+  if (otherUserId === me.id) throw new Error('You cannot start a chat with yourself.');
+
+  const rpcConversationId = await getOrCreateConversationViaRpc(otherUserId);
+  if (rpcConversationId) return rpcConversationId;
+
+  const sharedConversationId = await findSharedConversationId(me.id, otherUserId);
+  if (sharedConversationId) {
+    try {
+      await ensureConversationMembers(sharedConversationId, me.id, otherUserId);
+    } catch {
+      // non-fatal
+    }
+    return sharedConversationId;
+  }
+
   const { user1, user2 } = normalizePair(me.id, otherUserId);
 
-  // IMPORTANT: do not use maybeSingle/single here.
-  // Duplicate legacy rows can exist and cause 406.
   const { data: existingRows, error: findErr } = await supabase
     .from('conversations')
     .select('id,created_at')
@@ -451,67 +511,58 @@ export async function getOrCreateConversationWithUser(otherUserId: string): Prom
     .eq('user2_id', user2)
     .order('created_at', { ascending: true });
 
-  if (findErr) throw findErr;
+  if (findErr && !isRlsLikeError(findErr)) throw findErr;
 
-  if (existingRows && existingRows.length > 0) {
-    const conversationId = existingRows[0].id;
+  if (Array.isArray(existingRows) && existingRows.length > 0) {
+    const conversationId = String(existingRows[0].id);
     try {
       await ensureConversationMembers(conversationId, me.id, otherUserId);
     } catch {
-      // Non-fatal. Conversations table itself is enough for chat to work.
+      // non-fatal
     }
     return conversationId;
   }
 
-  const conversationId = newConversationId();
+  const { data: insertedRow, error: insertErr } = await supabase
+    .from('conversations')
+    .insert({ user1_id: user1, user2_id: user2 })
+    .select('id')
+    .single();
 
-  const { error: cErr } = await supabase.from('conversations').insert({
-    id: conversationId,
-    user1_id: user1,
-    user2_id: user2,
-  });
-
-  if (cErr) {
-    const msg = String((cErr as any)?.message ?? '').toLowerCase();
-    const code = String((cErr as any)?.code ?? '');
-
-    const isConflict =
-      code === '23505' ||
-      code === '409' ||
-      msg.includes('duplicate') ||
-      msg.includes('unique') ||
-      msg.includes('conflict');
-
-    if (isConflict) {
-      // Another row already exists or was created concurrently.
-      // Fetch again without single/maybeSingle and reuse the earliest row.
-      const { data: againRows, error: againErr } = await supabase
-        .from('conversations')
-        .select('id,created_at')
-        .eq('user1_id', user1)
-        .eq('user2_id', user2)
-        .order('created_at', { ascending: true });
-
-      if (againErr) throw againErr;
-      if (!againRows || againRows.length === 0) throw cErr;
-
-      const existingConversationId = againRows[0].id;
-      try {
-        await ensureConversationMembers(existingConversationId, me.id, otherUserId);
-      } catch {
-        // Non-fatal
-      }
-      return existingConversationId;
+  if (!insertErr && insertedRow?.id) {
+    const conversationId = String(insertedRow.id);
+    try {
+      await ensureConversationMembers(conversationId, me.id, otherUserId);
+    } catch {
+      // non-fatal
     }
-
-    throw cErr;
+    return conversationId;
   }
 
-  try {
-    await ensureConversationMembers(conversationId, me.id, otherUserId);
-  } catch {
-    // Non-fatal
+  if (insertErr && !isDuplicateishError(insertErr) && !isRlsLikeError(insertErr)) {
+    throw insertErr;
   }
 
-  return conversationId;
+  const sharedAfterInsert = await findSharedConversationId(me.id, otherUserId);
+  if (sharedAfterInsert) return sharedAfterInsert;
+
+  const { data: againRows, error: againErr } = await supabase
+    .from('conversations')
+    .select('id,created_at')
+    .eq('user1_id', user1)
+    .eq('user2_id', user2)
+    .order('created_at', { ascending: true });
+
+  if (againErr) throw againErr;
+  if (Array.isArray(againRows) && againRows.length > 0) {
+    const conversationId = String(againRows[0].id);
+    try {
+      await ensureConversationMembers(conversationId, me.id, otherUserId);
+    } catch {
+      // non-fatal
+    }
+    return conversationId;
+  }
+
+  throw new Error('Failed to start chat. Please run the latest messaging SQL patch.');
 }
