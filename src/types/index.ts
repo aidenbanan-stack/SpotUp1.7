@@ -126,6 +126,8 @@ export interface User {
     winner: number;
     bestTeammate: number;
   };
+  totalVotesReceived?: number;
+  voteBreakdown?: Record<string, number>;
   // Court exploration
   uniqueCourtsPlayed?: number;
   isPro?: boolean;

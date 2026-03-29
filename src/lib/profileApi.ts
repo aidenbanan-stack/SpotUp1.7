@@ -88,11 +88,16 @@ async function enrichUsersWithComputedStats(users: User[]): Promise<User[]> {
 
       for (const [category, bucket] of Object.entries(votes)) {
         const mapped = mapCategory(category);
-        if (!mapped) continue;
         for (const [playerId, count] of Object.entries(bucket ?? {})) {
           const profile = byId.get(playerId);
           if (!profile) continue;
-          profile.votesReceived[mapped] += Number(count ?? 0);
+          const numericCount = Number(count ?? 0);
+          if (mapped) profile.votesReceived[mapped] += numericCount;
+          profile.voteBreakdown = {
+            ...(profile.voteBreakdown ?? {}),
+            [category]: Number(profile.voteBreakdown?.[category] ?? 0) + numericCount,
+          };
+          profile.totalVotesReceived = Number(profile.totalVotesReceived ?? 0) + numericCount;
         }
       }
     }
@@ -156,6 +161,8 @@ function profileToUser(row: ProfileRow): User {
       score: row.reliability_score ?? 100,
     },
     votesReceived: { mostDominant: 0, winner: 0, bestTeammate: 0 },
+    totalVotesReceived: 0,
+    voteBreakdown: {},
     uniqueCourtsPlayed: 0,
     isPro: false,
     isAdmin: false,
@@ -186,6 +193,8 @@ function publicProfileToUser(row: PublicProfileRow): User {
     badges: [],
     reliabilityStats: { showUps: 0, cancellations: 0, noShows: 0, score: 100 },
     votesReceived: { mostDominant: 0, winner: 0, bestTeammate: 0 },
+    totalVotesReceived: 0,
+    voteBreakdown: {},
     uniqueCourtsPlayed: 0,
     isPro: false,
     isAdmin: false,

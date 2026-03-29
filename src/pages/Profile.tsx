@@ -23,6 +23,47 @@ import {
 import { SPORTS, type User as UserType } from '@/types';
 import { supabase } from '@/lib/supabaseClient';
 import { fetchProfileById } from '@/lib/profileApi';
+const VOTE_LABELS: Record<string, string> = {
+  most_dominant: 'Most Dominant',
+  best_teammate: 'Best Teammate',
+  winner: 'Winner',
+  sharpshooter: 'Sharpshooter',
+  finisher: 'Finisher',
+  playmaker: 'Playmaker',
+  wall: 'Wall',
+  ball_winner: 'Ball Winner',
+  engine: 'Engine',
+  dink_master: 'Dink Master',
+  net_boss: 'Net Boss',
+  rally_king: 'Rally King',
+  placement_pro: 'Placement Pro',
+  unshakeable: 'Unshakeable',
+  qb1: 'QB1',
+  route_runner: 'Route Runner',
+  hands_team: 'Hands Team',
+  lockdown_db: 'Lockdown DB',
+  big_play_threat: 'Big Play Threat',
+  slugger: 'Slugger',
+  ace: 'Ace',
+  gold_glove: 'Gold Glove',
+  spark_plug: 'Spark Plug',
+  closer: 'Closer',
+  kill_leader: 'Kill Leader',
+  block_party: 'Block Party',
+  setter_elite: 'Setter Elite',
+  dig_machine: 'Dig Machine',
+  serve_specialist: 'Serve Specialist',
+  handler: 'Handler',
+  deep_threat: 'Deep Threat',
+  shutdown_defender: 'Shutdown Defender',
+  layout_legend: 'Layout Legend',
+  field_general: 'Field General',
+};
+
+function formatVoteLabel(key: string) {
+  return VOTE_LABELS[key] ?? key.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+}
+
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -231,24 +272,30 @@ export default function Profile() {
 
         {/* Vote Stats */}
         <section className="glass-card p-4 animate-fade-in" style={{ animationDelay: '150ms' }}>
-          <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
-            <Trophy className="w-4 h-4 text-primary" />
-            Post-Game Votes Received
-          </h4>
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div>
-              <p className="text-lg font-bold text-foreground">{user.votesReceived.mostDominant}</p>
-              <p className="text-xs text-muted-foreground">🏆 Most Dominant</p>
-            </div>
-            <div>
-              <p className="text-lg font-bold text-foreground">{user.votesReceived.winner}</p>
-              <p className="text-xs text-muted-foreground">🛡️ Winner</p>
-            </div>
-            <div>
-              <p className="text-lg font-bold text-foreground">{user.votesReceived.bestTeammate}</p>
-              <p className="text-xs text-muted-foreground">🤝 Best Teammate</p>
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="font-semibold text-foreground flex items-center gap-2">
+              <Trophy className="w-4 h-4 text-primary" />
+              Post-Game Votes Received
+            </h4>
+            <div className="rounded-full bg-secondary/70 px-3 py-1 text-sm font-semibold">
+              {(user.totalVotesReceived ?? 0).toLocaleString()} total
             </div>
           </div>
+          {Object.keys(user.voteBreakdown ?? {}).length > 0 ? (
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {Object.entries(user.voteBreakdown ?? {})
+                .filter(([, count]) => Number(count) > 0)
+                .sort((a, b) => Number(b[1]) - Number(a[1]) || formatVoteLabel(a[0]).localeCompare(formatVoteLabel(b[0])))
+                .map(([category, count]) => (
+                  <div key={category} className="rounded-2xl bg-secondary/50 px-3 py-3 text-center">
+                    <p className="text-lg font-bold text-foreground">{Number(count).toLocaleString()}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{formatVoteLabel(category)}</p>
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-muted-foreground">No post-game votes received yet.</p>
+          )}
         </section>
 
         {/* Player Info */}

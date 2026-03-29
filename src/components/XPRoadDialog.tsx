@@ -41,11 +41,11 @@ type MarkerCluster = {
 };
 
 const ROAD_TOP_PADDING = 96;
-const ROAD_BOTTOM_PADDING = 156;
+const ROAD_BOTTOM_PADDING = 220;
 const ROAD_MAX_XP = 11000;
 const TIER_CARD_HEIGHT = 94;
 const TIER_SECTION_HEIGHT = 320;
-const ROOKIE_CARD_OFFSET = 108;
+const ROOKIE_CARD_OFFSET = 132;
 const MARKER_CLUSTER_GAP = 34;
 
 function xpForSport(user: User, sport: SportFilter): number {
@@ -323,6 +323,10 @@ export function XPRoadDialog({
   const tierAnchors = useMemo(() => buildTierAnchors(roadTiers), [roadTiers]);
   const roadHeight = useMemo(() => roadHeightForTierCount(roadTiers.length), [roadTiers]);
   const visibleTicks = useMemo(() => buildTierTicks(roadTiers), [roadTiers]);
+  const roadLineBottom = useMemo(() => {
+    const rookieY = tierAnchors['rookie'] ?? tierAnchorY(0, roadTiers);
+    return Math.max(36, roadHeight - (rookieY + TIER_CARD_HEIGHT / 2 - 6));
+  }, [roadHeight, roadTiers, tierAnchors]);
 
   const openProfile = (userId: string) => {
     setSelectedUserId(userId);
@@ -441,7 +445,10 @@ export function XPRoadDialog({
                   className="relative mx-auto"
                   style={{ height: roadHeight }}
                 >
-                  <div className="absolute bottom-[36px] left-1/2 top-[36px] w-[6px] -translate-x-1/2 rounded-full bg-gradient-to-t from-primary via-primary/80 to-primary/30 shadow-[0_0_24px_rgba(239,68,68,0.35)]" />
+                  <div
+                    className="absolute left-1/2 top-[36px] z-0 w-[6px] -translate-x-1/2 rounded-full bg-gradient-to-t from-primary via-primary/80 to-primary/30 shadow-[0_0_24px_rgba(239,68,68,0.35)]"
+                    style={{ bottom: roadLineBottom }}
+                  />
 
                   {visibleTicks.map((tick) => {
                     const y = xpToY(tick.xp, roadTiers);
@@ -537,7 +544,7 @@ export function XPRoadDialog({
                           </div>
                           {isGrouped && (
                             <div className="ml-2 flex h-7 min-w-7 items-center justify-center rounded-full bg-secondary px-2 text-xs font-semibold">
-                              +{Math.max(0, cluster.users.length - 3)}
+                              +{Math.max(0, cluster.users.length - 4)}
                             </div>
                           )}
                         </div>
