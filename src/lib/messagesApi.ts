@@ -429,27 +429,29 @@ export async function getOrCreateConversationWithUser(otherUserId: string): Prom
     }
   }
 
-// Ensure memberships exist. If your conversation_members table has a unique
-// constraint on (conversation_id, user_id) this stays idempotent.
-const { error: memInsertErr } = await supabase
-  .from('conversation_members')
-  .insert([
-    { conversation_id: conversationId, user_id: me.id },
-    { conversation_id: conversationId, user_id: otherUserId },
-  ]);
+  // Best-effort memberships only. The conversations table already stores
+  // user1_id/user2_id in this schema, so chat should still work even if
+  // conversation_members insertions fail because of RLS or partial setup.
+  for (const memberId of [me.id, otherUserId]) {
+    const { error: memInsertErr } = await supabase
+      .from('conversation_members')
+      .insert({ conversation_id: conversationId, user_id: memberId });
 
-if (memInsertErr) {
-  const msg = (memInsertErr as any)?.message ?? '';
-  const code = (memInsertErr as any)?.code ?? '';
+    if (!memInsertErr) continue;
 
-  // Ignore unique violation (already inserted)
-  const isDuplicate =
-    String(code) === '23505' ||
-    msg.toLowerCase().includes('duplicate') ||
-    msg.toLowerCase().includes('unique');
+    const msg = String((memInsertErr as any)?.message ?? '').toLowerCase();
+    const code = String((memInsertErr as any)?.code ?? '');
 
-  if (!isDuplicate) throw memInsertErr;
-}
+    const ignorable =
+      code === '23505' ||
+      msg.includes('duplicate') ||
+      msg.includes('unique') ||
+      msg.includes('row-level security') ||
+      msg.includes('permission denied') ||
+      msg.includes('violates row-level security');
+
+    if (!ignorable) throw memInsertErr;
+  }
 
   return conversationId;
 }
