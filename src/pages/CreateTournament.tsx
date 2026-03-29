@@ -50,6 +50,7 @@ export default function CreateTournament() {
 
   const [location, setLocation] = useState({ latitude: 34.0195, longitude: -118.4912, areaName: '' });
   const [dateTime, setDateTime] = useState('');
+  const [registrationClosesAt, setRegistrationClosesAt] = useState('');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -91,6 +92,7 @@ export default function CreateTournament() {
         location,
         startsAtISO: new Date(dateTime).toISOString(),
         notes: notes.trim() ? notes.trim() : null,
+        registrationClosesAtISO: registrationClosesAt ? new Date(registrationClosesAt).toISOString() : null,
       });
 
       toast.success('Tournament created!');
@@ -305,6 +307,35 @@ export default function CreateTournament() {
           </p>
         </div>
 
+
+        <div className="glass-card p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-primary" />
+            <h3 className="font-semibold">Timing</h3>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="tournament-start">Start time</Label>
+            <Input
+              id="tournament-start"
+              type="datetime-local"
+              value={dateTime}
+              onChange={(e) => setDateTime(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="registration-closes">Registration closes (optional)</Label>
+            <Input
+              id="registration-closes"
+              type="datetime-local"
+              value={registrationClosesAt}
+              onChange={(e) => setRegistrationClosesAt(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">Leave blank to keep registration open until the host locks it or the tournament starts.</p>
+          </div>
+        </div>
+
         {/* Private toggle */}
         <div className="glass-card p-4 flex items-center justify-between">
           <div className="flex items-start gap-3">
@@ -326,19 +357,6 @@ export default function CreateTournament() {
           <LocationPicker value={location} onChange={setLocation} />
         </div>
 
-        {/* Date & Time */}
-        <div className="space-y-2">
-          <Label className="flex items-center gap-2">
-            <Calendar className="w-4 h-4" />
-            Date & Time
-          </Label>
-          <Input
-            type="datetime-local"
-            value={dateTime}
-            onChange={(e) => setDateTime(e.target.value)}
-            className="bg-secondary/60"
-          />
-        </div>
 
         {/* Notes */}
         <div className="space-y-2">

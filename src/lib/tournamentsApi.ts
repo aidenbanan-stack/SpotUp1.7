@@ -214,6 +214,62 @@ export async function registerSquadForTournament(args: { tournamentId: string; s
   return (data as TournamentRegistrationRow | null) ?? null;
 }
 
+
+export async function reseedTournament(args: { tournamentId: string; method: 'ranking' | 'created_at' | 'random' }): Promise<TournamentRegistrationDetailRow[]> {
+  const { data, error } = await supabase
+    .rpc('reseed_tournament_secure', {
+      p_tournament_id: args.tournamentId,
+      p_method: args.method,
+    });
+
+  if (error) throw error;
+  return (data ?? []) as TournamentRegistrationDetailRow[];
+}
+
+export async function generateTournamentBracket(args: { tournamentId: string }): Promise<TournamentMatchDetailRow[]> {
+  const { data, error } = await supabase
+    .rpc('generate_tournament_bracket_secure', {
+      p_tournament_id: args.tournamentId,
+    });
+
+  if (error) throw error;
+  return (data ?? []) as TournamentMatchDetailRow[];
+}
+
+export async function lockTournamentRegistration(args: { tournamentId: string }): Promise<TournamentRow> {
+  const { data, error } = await supabase
+    .rpc('lock_tournament_registration_secure', {
+      p_tournament_id: args.tournamentId,
+    })
+    .single();
+
+  if (error) throw error;
+  return normalizeTournamentRows([data as TournamentRow])[0];
+}
+
+export async function startTournament(args: { tournamentId: string }): Promise<TournamentRow> {
+  const { data, error } = await supabase
+    .rpc('start_tournament_secure', {
+      p_tournament_id: args.tournamentId,
+    })
+    .single();
+
+  if (error) throw error;
+  return normalizeTournamentRows([data as TournamentRow])[0];
+}
+
+export async function cancelTournament(args: { tournamentId: string; reason?: string | null }): Promise<TournamentRow> {
+  const { data, error } = await supabase
+    .rpc('cancel_tournament_secure', {
+      p_tournament_id: args.tournamentId,
+      p_reason: args.reason ?? null,
+    })
+    .single();
+
+  if (error) throw error;
+  return normalizeTournamentRows([data as TournamentRow])[0];
+}
+
 export async function fetchTournamentRegistrationCount(tournamentId: string): Promise<number> {
   const { count, error } = await supabase
     .from('tournament_registrations')
