@@ -1,6 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Calendar, Lock, MapPin, Trophy, Users, Wand2, Play, Ban, ShieldAlert } from 'lucide-react';
+import {
+  ArrowLeft,
+  Calendar,
+  Copy,
+  Lock,
+  LogOut,
+  MapPin,
+  ShieldAlert,
+  Trophy,
+  Users,
+  Wand2,
+  Play,
+  Ban,
+} from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -12,13 +25,16 @@ import {
   fetchTournamentMatches,
   fetchTournamentRegistrations,
   generateTournamentBracket,
+  getPrivateTournamentAccessCode,
   getTournamentCapacity,
+  isTournamentRegistrationLocked,
   isUserOrSquadRegistered,
   lockTournamentRegistration,
   registerForTournament,
   registerSquadForTournament,
   reseedTournament,
   startTournament,
+  unregisterFromTournament,
   type TournamentMatchDetailRow,
   type TournamentRegistrationDetailRow,
   type TournamentRow,
@@ -73,35 +89,52 @@ export default function TournamentDetail() {
   const [matches, setMatches] = useState<TournamentMatchDetailRow[]>([]);
   const [registered, setRegistered] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-
   const [pickOpen, setPickOpen] = useState(false);
   const [mySquads, setMySquads] = useState<SquadWithMeta[]>([]);
   const [loadingSquads, setLoadingSquads] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [privateCode, setPrivateCode] = useState<string | null>(null);
 
   const isHost = !!user?.id && user.id === tournament?.host_id;
-
-  const canJoinAsSquad = useMemo(() => {
-    return tournament?.join_mode === 'squad' || tournament?.join_mode === 'either';
-  }, [tournament?.join_mode]);
-
-  const canJoinAsSolo = useMemo(() => {
-    return tournament?.join_mode === 'solo' || tournament?.join_mode === 'either';
-  }, [tournament?.join_mode]);
-
-  const registrationLocked = useMemo(() => {
-    if (!tournament) return false;
-    if (tournament.status !== 'scheduled') return true;
-    if (!tournament.registration_closes_at) return false;
-    return new Date(tournament.registration_closes_at).getTime() <= Date.now();
-  }, [tournament]);
-
+  const canJoinAsSquad = tournament?.join_mode === 'squad' || tournament?.join_mode === 'either';
+  const canJoinAsSolo = tournament?.join_mode === 'solo' || tournament?.join_mode === 'either';
+  const registrationLocked = isTournamentRegistrationLocked(tournament);
   const capacity = useMemo(() => (tournament ? getTournamentCapacity(tournament) : 0), [tournament]);
+
   const activeRegistrations = useMemo(
     () => registrations.filter((entry) => ['pending', 'registered', 'checked_in', 'champion'].includes(entry.status)).length,
     [registrations],
   );
+
+  const mySquadIds = useMemo(() => new Set(mySquads.map((s) => s.id)), [mySquads]);
+
+  const myRegistration = useMemo(() => {
+    if (!user?.id) return null;
+    return (
+      registrations.find((entry) => entry.user_id === user.id) ??
+      registrations.find((entry) => !!entry.squad_id && mySquadIds.has(entry.squad_id)) ??
+      null
+    );
+  }, [mySquadIds, registrations, user?.id]);
+
+  const leaveDisabledReason = useMemo(() => {
+    if (!tournament || !myRegistration) return null;
+    if (isHost) return 'Hosts cannot leave their own tournament';
+    if (tournament.status !== 'scheduled') return 'You can only leave before the tournament starts';
+    if (tournament.bracket_generated_at) return 'You can no longer leave after the bracket is generated';
+    return null;
+  }, [isHost, myRegistration, tournament]);
+
+  const joinDisabledReason = useMemo(() => {
+    if (!tournament) return 'Tournament not found';
+    if (registered) return 'You are already registered';
+    if (tournament.status !== 'scheduled') return 'This tournament is not accepting registrations';
+    if (registrationLocked) return 'Registration is closed';
+    if (capacity > 0 && activeRegistrations >= capacity) return 'Tournament is full';
+    return null;
+  }, [activeRegistrations, capacity, registered, registrationLocked, tournament]);
+
   const bracketRounds = useMemo(() => {
     const grouped = new Map<number, TournamentMatchDetailRow[]>();
     for (const match of matches) {
@@ -114,6 +147,23 @@ export default function TournamentDetail() {
       .sort((a, b) => a[0] - b[0])
       .map(([round, items]) => ({ round, items: items.sort((a, b) => a.match_number - b.match_number) }));
   }, [matches]);
+
+  async function loadMySquads() {
+    if (!user?.id) {
+      setMySquads([]);
+      return;
+    }
+    try {
+      setLoadingSquads(true);
+      const squads = await fetchMySquads(user.id);
+      setMySquads(squads);
+    } catch (e) {
+      console.error(e);
+      setMySquads([]);
+    } finally {
+      setLoadingSquads(false);
+    }
+  }
 
   async function refresh() {
     if (!id) return;
@@ -129,10 +179,14 @@ export default function TournamentDetail() {
       setMatches(m);
 
       if (user?.id) {
-        const r = await isUserOrSquadRegistered({ tournamentId: id, userId: user.id });
+        const [r] = await Promise.all([
+          isUserOrSquadRegistered({ tournamentId: id, userId: user.id }),
+          loadMySquads(),
+        ]);
         setRegistered(r);
       } else {
         setRegistered(false);
+        setMySquads([]);
       }
     } catch (e) {
       console.error(e);
@@ -149,21 +203,21 @@ export default function TournamentDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, user?.id]);
 
-  async function loadSquadsIfNeeded() {
-    if (!user?.id) return;
-    if (mySquads.length > 0) return;
-
-    try {
-      setLoadingSquads(true);
-      const squads = await fetchMySquads(user.id);
-      setMySquads(squads);
-    } catch (e) {
-      console.error(e);
-      setMySquads([]);
-    } finally {
-      setLoadingSquads(false);
+  useEffect(() => {
+    async function loadCode() {
+      if (!tournament?.id || !tournament.is_private || !user?.id) {
+        setPrivateCode(null);
+        return;
+      }
+      try {
+        const code = await getPrivateTournamentAccessCode({ tournamentId: tournament.id });
+        setPrivateCode(code);
+      } catch {
+        setPrivateCode(null);
+      }
     }
-  }
+    void loadCode();
+  }, [tournament?.id, tournament?.is_private, user?.id, registered, isHost]);
 
   async function runHostAction(actionKey: string, action: () => Promise<void>, successMessage: string) {
     try {
@@ -180,8 +234,7 @@ export default function TournamentDetail() {
   }
 
   async function onJoinSolo() {
-    if (!id) return;
-    if (!user?.id) {
+    if (!id || !user?.id) {
       toast.error('Please sign in first');
       return;
     }
@@ -190,6 +243,7 @@ export default function TournamentDetail() {
       await registerForTournament({ tournamentId: id, userId: user.id });
       await refresh();
       setRegistered(true);
+      setPickOpen(false);
       toast.success('Joined tournament!');
     } catch (e: any) {
       console.error(e);
@@ -200,8 +254,7 @@ export default function TournamentDetail() {
   }
 
   async function onJoinSquad(squadId: string) {
-    if (!id) return;
-    if (!user?.id) {
+    if (!id || !user?.id) {
       toast.error('Please sign in first');
       return;
     }
@@ -220,14 +273,33 @@ export default function TournamentDetail() {
     }
   }
 
+  async function onLeaveTournament() {
+    if (!id || !myRegistration) return;
+    try {
+      setBusyAction('leave');
+      await unregisterFromTournament({
+        tournamentId: id,
+        squadId: myRegistration.entry_type === 'squad' ? myRegistration.squad_id : null,
+      });
+      await refresh();
+      setRegistered(false);
+      toast.success(myRegistration.entry_type === 'squad' ? 'Squad removed from tournament' : 'You left the tournament');
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message ? `Could not leave: ${e.message}` : 'Could not leave tournament.');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   async function onJoinPressed() {
     if (!tournament) return;
     if (!user?.id) {
       toast.error('Please sign in first');
       return;
     }
-    if (registrationLocked) {
-      toast.error('Registration is closed for this tournament');
+    if (joinDisabledReason) {
+      toast.error(joinDisabledReason);
       return;
     }
 
@@ -236,8 +308,20 @@ export default function TournamentDetail() {
       return;
     }
 
-    await loadSquadsIfNeeded();
+    if (mySquads.length === 0) {
+      await loadMySquads();
+    }
     setPickOpen(true);
+  }
+
+  async function copyPrivateCode() {
+    if (!privateCode) return;
+    try {
+      await navigator.clipboard.writeText(privateCode);
+      toast.success('Private code copied');
+    } catch {
+      toast.error('Could not copy code');
+    }
   }
 
   return (
@@ -274,6 +358,7 @@ export default function TournamentDetail() {
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-lg font-bold truncate">{tournament.name}</p>
                     <span className="px-2 py-0.5 rounded-lg bg-secondary/60 text-xs">{tournamentStatusLabel(tournament.status)}</span>
+                    {tournament.is_private ? <span className="px-2 py-0.5 rounded-lg bg-primary/10 text-xs text-primary">Private</span> : null}
                   </div>
                   <p className="text-sm text-muted-foreground">{(SPORTS as any)[tournament.sport]?.label ?? tournament.sport}</p>
 
@@ -295,25 +380,44 @@ export default function TournamentDetail() {
 
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <Lock className="w-4 h-4" />
-                      <span>{registrationLocked ? `Registration closed ${formatCompact(tournament.registration_closes_at)}` : `Registration open${tournament.registration_closes_at ? ` until ${formatCompact(tournament.registration_closes_at)}` : ''}`}</span>
+                      <span>
+                        {registrationLocked
+                          ? `Registration closed ${formatCompact(tournament.registration_closes_at)}`
+                          : `Registration open${tournament.registration_closes_at ? ` until ${formatCompact(tournament.registration_closes_at)}` : ''}`}
+                      </span>
                     </div>
-
-                    {tournament.is_private ? (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <ShieldAlert className="w-4 h-4" />
-                        <span>Private tournament</span>
-                      </div>
-                    ) : null}
                   </div>
                 </div>
               </div>
             </div>
 
+            {tournament.is_private && privateCode ? (
+              <div className="glass-card p-4 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">Private access code</p>
+                    <p className="text-sm text-muted-foreground">
+                      Share this code with players you want to invite into the tournament.
+                    </p>
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={copyPrivateCode}>
+                    <Copy className="w-4 h-4 mr-2" />
+                    Copy
+                  </Button>
+                </div>
+                <div className="rounded-xl border border-border/60 px-4 py-3 text-lg font-bold tracking-[0.3em]">
+                  {privateCode}
+                </div>
+              </div>
+            ) : null}
+
             <div className="glass-card p-5 space-y-4">
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <p className="font-semibold">Overview</p>
-                  <p className="text-sm text-muted-foreground">{tournament.format} • {tournament.series_type === 'best_of_3' ? 'Best of 3' : 'Single elimination'} • {tournament.join_mode}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {tournament.format} • {tournament.series_type === 'best_of_3' ? 'Best of 3' : 'Single elimination'} • {tournament.join_mode}
+                  </p>
                 </div>
                 <Trophy className="w-6 h-6 text-primary" />
               </div>
@@ -322,16 +426,31 @@ export default function TournamentDetail() {
                 <div className="text-sm text-muted-foreground whitespace-pre-wrap">{tournament.notes}</div>
               ) : null}
 
-              {registered ? (
-                <Button className="w-full" disabled>
-                  <Users className="w-4 h-4 mr-2" />
-                  You&apos;re registered
-                </Button>
+              {registered && myRegistration ? (
+                <div className="space-y-3">
+                  <div className="rounded-xl bg-primary/10 px-4 py-3 text-sm">
+                    <p className="font-medium text-primary">You&apos;re in this tournament</p>
+                    <p className="text-muted-foreground mt-1">
+                      {myRegistration.entry_type === 'squad'
+                        ? `${myRegistration.display_name} is registered as your squad entry.`
+                        : 'Your solo entry is confirmed.'}
+                    </p>
+                  </div>
+                  <Button className="w-full" variant="outline" onClick={onLeaveTournament} disabled={!!busyAction || !!leaveDisabledReason}>
+                    <LogOut className="w-4 h-4 mr-2" />
+                    {busyAction === 'leave' ? 'Leaving...' : leaveDisabledReason ? leaveDisabledReason : 'Leave tournament'}
+                  </Button>
+                </div>
               ) : (
-                <Button className="w-full" onClick={onJoinPressed} disabled={!!busyAction || registrationLocked || tournament.status !== 'scheduled'}>
-                  <Users className="w-4 h-4 mr-2" />
-                  {busyAction === 'join_solo' || busyAction === 'join_squad' ? 'Joining...' : registrationLocked ? 'Registration closed' : 'Join tournament'}
-                </Button>
+                <div className="space-y-3">
+                  <Button className="w-full" onClick={onJoinPressed} disabled={!!busyAction || !!joinDisabledReason}>
+                    <Users className="w-4 h-4 mr-2" />
+                    {busyAction === 'join_solo' || busyAction === 'join_squad'
+                      ? 'Joining...'
+                      : joinDisabledReason ?? 'Join tournament'}
+                  </Button>
+                  {joinDisabledReason ? <p className="text-xs text-muted-foreground">{joinDisabledReason}</p> : null}
+                </div>
               )}
             </div>
 
@@ -339,7 +458,7 @@ export default function TournamentDetail() {
               <div className="glass-card p-5 space-y-4">
                 <div>
                   <p className="font-semibold">Host controls</p>
-                  <p className="text-sm text-muted-foreground">Phase 2 controls for locking registration, seeding entrants, generating the bracket, and starting or cancelling the tournament.</p>
+                  <p className="text-sm text-muted-foreground">Manage registration, seeding, bracket generation, and tournament state.</p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -403,7 +522,7 @@ export default function TournamentDetail() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-semibold">Entrants</p>
-                  <p className="text-sm text-muted-foreground">Seeds are shown after you run tournament seeding.</p>
+                  <p className="text-sm text-muted-foreground">Seeds are shown after the host runs seeding.</p>
                 </div>
                 <span className="text-sm text-muted-foreground">{activeRegistrations} registered</span>
               </div>
@@ -412,18 +531,24 @@ export default function TournamentDetail() {
                 <p className="text-sm text-muted-foreground">No entrants yet.</p>
               ) : (
                 <div className="space-y-2">
-                  {registrations.map((entry) => (
-                    <div key={entry.id} className="flex items-center justify-between rounded-xl bg-secondary/40 px-3 py-2 gap-3">
-                      <div className="min-w-0">
-                        <p className="font-medium truncate">{entry.display_name}</p>
-                        <p className="text-xs text-muted-foreground">{entry.entry_type === 'squad' ? 'Squad entry' : 'Solo entry'} • {entry.status}</p>
+                  {registrations.map((entry) => {
+                    const isMine = myRegistration?.id === entry.id;
+                    return (
+                      <div key={entry.id} className="flex items-center justify-between rounded-xl bg-secondary/40 px-3 py-2 gap-3">
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">
+                            {entry.display_name}
+                            {isMine ? <span className="ml-2 text-xs text-primary">• You</span> : null}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{entry.entry_type === 'squad' ? 'Squad entry' : 'Solo entry'} • {entry.status}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-sm font-semibold">{entry.seed ? `#${entry.seed}` : 'Unseeded'}</p>
+                          <p className="text-xs text-muted-foreground">{formatCompact(entry.created_at)}</p>
+                        </div>
                       </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-sm font-semibold">{entry.seed ? `#${entry.seed}` : 'Unseeded'}</p>
-                        <p className="text-xs text-muted-foreground">{formatCompact(entry.created_at)}</p>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -461,9 +586,7 @@ export default function TournamentDetail() {
                                 <span className="text-muted-foreground">{match.participant_2_score ?? '—'}</span>
                               </div>
                             </div>
-                            {match.winner_name ? (
-                              <p className="mt-2 text-xs text-primary font-medium">Winner: {match.winner_name}</p>
-                            ) : null}
+                            {match.winner_name ? <p className="mt-2 text-xs text-primary font-medium">Winner: {match.winner_name}</p> : null}
                           </div>
                         ))}
                       </div>
@@ -525,11 +648,7 @@ export default function TournamentDetail() {
                 </DialogHeader>
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">This will cancel the tournament and mark any unfinished bracket matches as cancelled.</p>
-                  <Textarea
-                    value={cancelReason}
-                    onChange={(e) => setCancelReason(e.target.value)}
-                    placeholder="Optional reason"
-                  />
+                  <Textarea value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="Optional reason" />
                   <Button
                     variant="destructive"
                     className="w-full"

@@ -342,7 +342,7 @@ export default function CreateTournament() {
             <Lock className="w-4 h-4 text-primary mt-0.5" />
             <div>
               <Label>Private tournament</Label>
-              <p className="text-xs text-muted-foreground">Only invited players can view or join</p>
+              <p className="text-xs text-muted-foreground">Only invited players can view or join. A shareable access code will be generated automatically.</p>
             </div>
           </div>
           <Switch checked={isPrivate} onCheckedChange={setIsPrivate} />

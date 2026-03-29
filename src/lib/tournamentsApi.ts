@@ -96,6 +96,13 @@ export type TournamentMatchDetailRow = TournamentMatchRow & {
   loser_name?: string | null;
 };
 
+export type JoinPrivateTournamentResult = {
+  tournament_id: string;
+  registration_id: string;
+  join_mode: TournamentJoinMode;
+  registration_status: TournamentRegistrationStatus;
+};
+
 function isDupError(error: unknown): boolean {
   const maybeError = error as { message?: string; code?: string } | null;
   const msg = maybeError?.message ?? '';
@@ -121,6 +128,18 @@ export function getTournamentCapacity(tournament: Pick<TournamentRow, 'team_coun
 
   const parsed = Number(String(tournament.team_count).replace(/[^0-9]/g, ''));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+export function getTournamentAccessCode(tournament: Pick<TournamentRow, 'settings'> | null | undefined): string | null {
+  const raw = tournament?.settings?.['access_code'];
+  return typeof raw === 'string' && raw.trim() ? raw.trim().toUpperCase() : null;
+}
+
+export function isTournamentRegistrationLocked(tournament: Pick<TournamentRow, 'status' | 'registration_closes_at'> | null | undefined): boolean {
+  if (!tournament) return false;
+  if (tournament.status !== 'scheduled') return true;
+  if (!tournament.registration_closes_at) return false;
+  return new Date(tournament.registration_closes_at).getTime() <= Date.now();
 }
 
 export async function fetchPublicTournaments(): Promise<TournamentRow[]> {
@@ -214,6 +233,39 @@ export async function registerSquadForTournament(args: { tournamentId: string; s
   return (data as TournamentRegistrationRow | null) ?? null;
 }
 
+export async function joinPrivateTournamentWithCode(args: { accessCode: string; squadId?: string | null }): Promise<JoinPrivateTournamentResult> {
+  const { data, error } = await supabase
+    .rpc('join_private_tournament_with_code_secure', {
+      p_access_code: args.accessCode,
+      p_squad_id: args.squadId ?? null,
+    })
+    .single();
+
+  if (error) throw error;
+  return data as JoinPrivateTournamentResult;
+}
+
+export async function unregisterFromTournament(args: { tournamentId: string; squadId?: string | null }): Promise<TournamentRegistrationRow> {
+  const { data, error } = await supabase
+    .rpc('unregister_from_tournament_secure', {
+      p_tournament_id: args.tournamentId,
+      p_squad_id: args.squadId ?? null,
+    })
+    .single();
+
+  if (error) throw error;
+  return data as TournamentRegistrationRow;
+}
+
+export async function getPrivateTournamentAccessCode(args: { tournamentId: string }): Promise<string | null> {
+  const { data, error } = await supabase
+    .rpc('get_private_tournament_access_code_secure', {
+      p_tournament_id: args.tournamentId,
+    });
+
+  if (error) throw error;
+  return typeof data === 'string' && data.trim() ? data.trim().toUpperCase() : null;
+}
 
 export async function reseedTournament(args: { tournamentId: string; method: 'ranking' | 'created_at' | 'random' }): Promise<TournamentRegistrationDetailRow[]> {
   const { data, error } = await supabase
