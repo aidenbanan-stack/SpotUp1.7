@@ -13,11 +13,14 @@ import {
   Wand2,
   Play,
   Ban,
+  CheckCircle2,
+  Swords,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { SPORTS } from '@/types';
 import {
   cancelTournament,
@@ -34,6 +37,8 @@ import {
   registerSquadForTournament,
   reseedTournament,
   startTournament,
+  startTournamentMatch,
+  submitTournamentMatchResult,
   unregisterFromTournament,
   type TournamentMatchDetailRow,
   type TournamentRegistrationDetailRow,
@@ -95,6 +100,10 @@ export default function TournamentDetail() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [privateCode, setPrivateCode] = useState<string | null>(null);
+  const [scoreOpen, setScoreOpen] = useState(false);
+  const [selectedMatch, setSelectedMatch] = useState<TournamentMatchDetailRow | null>(null);
+  const [participant1Score, setParticipant1Score] = useState('');
+  const [participant2Score, setParticipant2Score] = useState('');
 
   const isHost = !!user?.id && user.id === tournament?.host_id;
   const canJoinAsSquad = tournament?.join_mode === 'squad' || tournament?.join_mode === 'either';
@@ -117,6 +126,11 @@ export default function TournamentDetail() {
       null
     );
   }, [mySquadIds, registrations, user?.id]);
+
+  const championRegistration = useMemo(() => {
+    if (!tournament?.winner_registration_id) return null;
+    return registrations.find((entry) => entry.id === tournament.winner_registration_id) ?? null;
+  }, [registrations, tournament?.winner_registration_id]);
 
   const leaveDisabledReason = useMemo(() => {
     if (!tournament || !myRegistration) return null;
@@ -324,6 +338,62 @@ export default function TournamentDetail() {
     }
   }
 
+  function openScoreDialog(match: TournamentMatchDetailRow) {
+    setSelectedMatch(match);
+    setParticipant1Score(match.participant_1_score != null ? String(match.participant_1_score) : '');
+    setParticipant2Score(match.participant_2_score != null ? String(match.participant_2_score) : '');
+    setScoreOpen(true);
+  }
+
+  async function onStartMatch(matchId: string) {
+    try {
+      setBusyAction(`start_match_${matchId}`);
+      await startTournamentMatch({ matchId });
+      await refresh();
+      toast.success('Match started');
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message ? `Could not start match: ${e.message}` : 'Could not start match.');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function onSubmitMatchResult() {
+    if (!selectedMatch) return;
+
+    const p1 = Number(participant1Score);
+    const p2 = Number(participant2Score);
+
+    if (!Number.isFinite(p1) || !Number.isFinite(p2) || p1 < 0 || p2 < 0) {
+      toast.error('Enter valid non-negative scores');
+      return;
+    }
+
+    if (p1 === p2) {
+      toast.error('Scores cannot be tied');
+      return;
+    }
+
+    try {
+      setBusyAction(`submit_match_${selectedMatch.id}`);
+      const result = await submitTournamentMatchResult({
+        matchId: selectedMatch.id,
+        participant1Score: p1,
+        participant2Score: p2,
+      });
+      await refresh();
+      setScoreOpen(false);
+      setSelectedMatch(null);
+      toast.success(result.tournament.status === 'completed' ? 'Match submitted. Tournament completed!' : 'Match result submitted');
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message ? `Could not submit result: ${e.message}` : 'Could not submit result.');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background safe-top pb-24">
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/50">
@@ -390,6 +460,18 @@ export default function TournamentDetail() {
                 </div>
               </div>
             </div>
+
+            {tournament.status === 'completed' && championRegistration ? (
+              <div className="glass-card p-5 bg-primary/10 border border-primary/20">
+                <div className="flex items-center gap-3">
+                  <CheckCircle2 className="w-8 h-8 text-primary" />
+                  <div>
+                    <p className="text-sm text-muted-foreground">Tournament champion</p>
+                    <p className="text-xl font-bold text-primary">{championRegistration.display_name}</p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             {tournament.is_private && privateCode ? (
               <div className="glass-card p-4 space-y-2">
@@ -557,7 +639,7 @@ export default function TournamentDetail() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-semibold">Bracket preview</p>
-                  <p className="text-sm text-muted-foreground">Generated matches appear here before and after tournament start.</p>
+                  <p className="text-sm text-muted-foreground">Start matches, submit scores, and watch winners advance automatically.</p>
                 </div>
                 <span className="text-sm text-muted-foreground">{matches.length} matches</span>
               </div>
@@ -570,25 +652,55 @@ export default function TournamentDetail() {
                     <div key={round.round} className="space-y-2">
                       <p className="text-sm font-semibold text-muted-foreground">{round.items[0]?.stage_label ?? `Round ${round.round}`}</p>
                       <div className="space-y-2">
-                        {round.items.map((match) => (
-                          <div key={match.id} className="rounded-xl border border-border/60 p-3">
-                            <div className="flex items-center justify-between gap-3 mb-2">
-                              <p className="font-medium">Match {match.match_number}</p>
-                              <span className="text-xs px-2 py-0.5 rounded-lg bg-secondary/60">{matchStatusLabel(match.status)}</span>
-                            </div>
-                            <div className="space-y-1 text-sm">
+                        {round.items.map((match) => {
+                          const canManageMatch = isHost && tournament.status === 'active' && !['completed', 'cancelled'].includes(match.status);
+                          const canStart = canManageMatch && match.status === 'ready';
+                          const canSubmit = canManageMatch && ['ready', 'in_progress'].includes(match.status) && !!match.participant_1_registration_id && !!match.participant_2_registration_id;
+                          const isP1Winner = !!match.winner_registration_id && match.winner_registration_id === match.participant_1_registration_id;
+                          const isP2Winner = !!match.winner_registration_id && match.winner_registration_id === match.participant_2_registration_id;
+
+                          return (
+                            <div key={match.id} className="rounded-xl border border-border/60 p-3 space-y-3">
                               <div className="flex items-center justify-between gap-3">
-                                <span className="truncate">{match.participant_1_name ?? 'TBD'}</span>
-                                <span className="text-muted-foreground">{match.participant_1_score ?? '—'}</span>
+                                <div>
+                                  <p className="font-medium">Match {match.match_number}</p>
+                                  <p className="text-xs text-muted-foreground">Best of {match.best_of}</p>
+                                </div>
+                                <span className="text-xs px-2 py-0.5 rounded-lg bg-secondary/60">{matchStatusLabel(match.status)}</span>
                               </div>
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="truncate">{match.participant_2_name ?? 'TBD'}</span>
-                                <span className="text-muted-foreground">{match.participant_2_score ?? '—'}</span>
+
+                              <div className="space-y-2 text-sm">
+                                <div className={`flex items-center justify-between gap-3 rounded-lg px-2 py-2 ${isP1Winner ? 'bg-primary/10' : 'bg-secondary/30'}`}>
+                                  <span className="truncate font-medium">{match.participant_1_name ?? 'TBD'}</span>
+                                  <span className="text-muted-foreground">{match.participant_1_score ?? '—'}</span>
+                                </div>
+                                <div className={`flex items-center justify-between gap-3 rounded-lg px-2 py-2 ${isP2Winner ? 'bg-primary/10' : 'bg-secondary/30'}`}>
+                                  <span className="truncate font-medium">{match.participant_2_name ?? 'TBD'}</span>
+                                  <span className="text-muted-foreground">{match.participant_2_score ?? '—'}</span>
+                                </div>
                               </div>
+
+                              {match.winner_name ? <p className="text-xs text-primary font-medium">Winner: {match.winner_name}</p> : null}
+
+                              {canManageMatch ? (
+                                <div className="flex flex-wrap gap-2">
+                                  {canStart ? (
+                                    <Button size="sm" variant="secondary" onClick={() => onStartMatch(match.id)} disabled={!!busyAction}>
+                                      <Swords className="w-4 h-4 mr-2" />
+                                      {busyAction === `start_match_${match.id}` ? 'Starting...' : 'Start match'}
+                                    </Button>
+                                  ) : null}
+                                  {canSubmit ? (
+                                    <Button size="sm" onClick={() => openScoreDialog(match)} disabled={!!busyAction}>
+                                      <CheckCircle2 className="w-4 h-4 mr-2" />
+                                      {busyAction === `submit_match_${match.id}` ? 'Submitting...' : 'Report result'}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              ) : null}
                             </div>
-                            {match.winner_name ? <p className="mt-2 text-xs text-primary font-medium">Winner: {match.winner_name}</p> : null}
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
@@ -638,6 +750,45 @@ export default function TournamentDetail() {
                     </div>
                   ) : null}
                 </div>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={scoreOpen} onOpenChange={setScoreOpen}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Submit match result</DialogTitle>
+                </DialogHeader>
+                {selectedMatch ? (
+                  <div className="space-y-4">
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-sm font-medium">{selectedMatch.participant_1_name ?? 'Participant 1'}</p>
+                        <Input
+                          inputMode="numeric"
+                          type="number"
+                          min="0"
+                          value={participant1Score}
+                          onChange={(e) => setParticipant1Score(e.target.value)}
+                          placeholder="Score"
+                        />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">{selectedMatch.participant_2_name ?? 'Participant 2'}</p>
+                        <Input
+                          inputMode="numeric"
+                          type="number"
+                          min="0"
+                          value={participant2Score}
+                          onChange={(e) => setParticipant2Score(e.target.value)}
+                          placeholder="Score"
+                        />
+                      </div>
+                    </div>
+                    <Button className="w-full" onClick={onSubmitMatchResult} disabled={!!busyAction}>
+                      {busyAction === `submit_match_${selectedMatch.id}` ? 'Submitting...' : 'Submit result'}
+                    </Button>
+                  </div>
+                ) : null}
               </DialogContent>
             </Dialog>
 

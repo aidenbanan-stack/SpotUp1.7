@@ -96,6 +96,14 @@ export type TournamentMatchDetailRow = TournamentMatchRow & {
   loser_name?: string | null;
 };
 
+
+export type TournamentMatchStartResult = TournamentMatchDetailRow;
+export type TournamentMatchSubmitResult = {
+  updated_match: TournamentMatchDetailRow;
+  affected_matches: TournamentMatchDetailRow[];
+  tournament: TournamentRow;
+};
+
 export type JoinPrivateTournamentResult = {
   tournament_id: string;
   registration_id: string;
@@ -320,6 +328,34 @@ export async function cancelTournament(args: { tournamentId: string; reason?: st
 
   if (error) throw error;
   return normalizeTournamentRows([data as TournamentRow])[0];
+}
+
+export async function startTournamentMatch(args: { matchId: string }): Promise<TournamentMatchStartResult> {
+  const { data, error } = await supabase
+    .rpc('start_tournament_match_secure', {
+      p_match_id: args.matchId,
+    })
+    .single();
+
+  if (error) throw error;
+  return data as TournamentMatchStartResult;
+}
+
+export async function submitTournamentMatchResult(args: {
+  matchId: string;
+  participant1Score: number;
+  participant2Score: number;
+}): Promise<TournamentMatchSubmitResult> {
+  const { data, error } = await supabase
+    .rpc('submit_tournament_match_result_secure', {
+      p_match_id: args.matchId,
+      p_participant_1_score: args.participant1Score,
+      p_participant_2_score: args.participant2Score,
+    })
+    .single();
+
+  if (error) throw error;
+  return data as TournamentMatchSubmitResult;
 }
 
 export async function fetchTournamentRegistrationCount(tournamentId: string): Promise<number> {
