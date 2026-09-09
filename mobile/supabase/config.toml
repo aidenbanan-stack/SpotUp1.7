@@ -1,0 +1,27 @@
+project_id = "spotup"
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+[db]
+port = 54322
+major_version = 17
+[auth]
+enabled = true
+site_url = "http://localhost:8081"
+additional_redirect_urls = ["spotup://auth/callback", "http://localhost:8081/auth/callback"]
+minimum_password_length = 12
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+[storage]
+enabled = true
+file_size_limit = "100MiB"
+[functions.places]
+verify_jwt = true
+[functions.delete-account]
+verify_jwt = true
+[functions.dispatch-push]
+verify_jwt = false
