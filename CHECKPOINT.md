@@ -17,16 +17,22 @@ The replacement Expo/React Native app is in `mobile/`. The older Vite applicatio
 - The complete cutover plus 26 database integration checks passed locally, including registered-account preservation and denying access to the legacy schema.
 - Web production export passed.
 
-## Not deployed at this checkpoint
+## Deployment progress
 
-The Supabase cutover and Edge Functions have NOT been deployed. The live database remains the old version, including its existing security gaps. The new frontend requires the cutover before live app workflows can work. GitHub/Vercel publication must be verified separately; a local commit is not a deployment.
+The code is published on GitHub branch `codex/spotup-rebuild` (initial published commit `8a4aa7d9338429c248a2f43d6ae51d399ec5e1d7`). Vercel's `spot-up-app` preview build succeeded. Two additional linked projects have separate build statuses; the production-domain mapping still needs verification through Vercel.
+
+Supabase Edge Functions `places`, `delete-account`, and `dispatch-push` are deployed (version 1). Google Places/push secrets and scheduler are not configured by this work. Unauthenticated requests must be rejected.
+
+The database cutover has NOT been applied: all 18 registered accounts and the original application database remain intact. The replacement frontend requires that cutover. Production `main` has not been advanced, and `spotup.vercel.app` still serves the original Vite app.
+
+The cloud browser cannot reach the local preview (`ERR_BLOCKED_BY_CLIENT`), so no browser interaction/visual QA is claimed.
 
 ## Resume order
 
 1. Confirm GitHub write access and Vercel linkage/production branch for `spotup.vercel.app`.
 2. Review and apply the tested cutover to project `qzssyfzfrghvmgggzplc` (only once). It archives the old public schema behind revoked client permissions, creates a new public schema, preserves Auth accounts/profile identity, and starts with no games/squads/XP.
 3. Verify all account IDs are preserved, the new RLS controls work, and legacy RPCs are inaccessible.
-4. Deploy `places`, `delete-account`, and `dispatch-push` from `mobile/supabase/functions`. Configure Google Places and push-worker secrets where needed.
+4. The three Edge Functions are deployed. Configure Google Places and push-worker secrets where needed, then verify them with the new schema.
 5. Confirm Auth redirect URLs include `https://spotup.vercel.app/auth/callback`, the localhost callback, and `spotup://auth/callback`.
 6. Publish the prepared commit to the Vercel production branch, verify the deployment, then test sign-in, game creation/joining, the map, and privacy controls in the browser.
 
