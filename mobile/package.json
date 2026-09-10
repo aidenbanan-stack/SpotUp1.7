@@ -47,7 +47,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test tests/domain.test.ts && node --import tsx tests/database.mts",
+    "test": "node --import tsx --test tests/domain.test.ts tests/loading.test.ts && node --import tsx tests/database.mts",
     "export": "expo export --platform all",
     "db:test": "node --import tsx tests/database.mts",
     "format": "prettier --write app src tests supabase/functions app.config.ts",

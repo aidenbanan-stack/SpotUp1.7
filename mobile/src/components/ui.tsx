@@ -367,7 +367,11 @@ export function ErrorBox({
   return (
     <Card style={{ backgroundColor: "#301C23" }}>
       <Txt color={C.red}>
-        {error instanceof Error ? error.message : String(error)}
+        {error instanceof Error
+          ? error.message
+          : typeof error === "object" && error !== null && "message" in error
+            ? String(error.message)
+            : String(error)}
       </Txt>
       {retry && <Button title="Try again" kind="ghost" onPress={retry} />}
     </Card>

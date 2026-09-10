@@ -21,3 +21,6 @@ TypeScript, 5 domain tests and 26 database integration checks pass. The new cons
 
 ## Remaining operations
 Videos require moderator review before other players see them. No automatic video inspection service has been configured. Google Places and push worker secrets/scheduling remain unconfigured. Native OAuth redirect allowlisting and native device QA remain outstanding.
+
+## Loading recovery fix
+Removed query-cache clearing from authentication events. Cache instances now persist across token refreshes and are isolated by account. Session initialization and API requests have bounded waits with readable retry errors. Three regression tests cover pending queries, account isolation and request timeouts. Supabase reported ACTIVE_HEALTHY but database SQL checks and the public REST endpoint timed out during this investigation; infrastructure availability remains a separate issue from the repaired client bug.

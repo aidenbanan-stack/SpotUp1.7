@@ -1,21 +1,22 @@
-import React, { useEffect } from "react";
+import { createAccountCache } from "../src/lib/accountCache";
+import React, { useEffect, useState } from "react";
 import { Stack, router, useSegments, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Notifications from "expo-notifications";
-import { SessionProvider, useSession, queryClient } from "../src/lib/session";
-import { C, Loading, Screen } from "../src/components/ui";
+import { SessionProvider, useSession } from "../src/lib/session";
+import { C, Loading, Screen, ErrorBox } from "../src/components/ui";
 function Navigation() {
-  const { session, loading } = useSession();
+  const { session, loading, error, retry } = useSession();
   const segments = useSegments() as string[];
   const pathname = usePathname();
   useEffect(() => {
-    if (loading) return;
+    if (loading || error) return;
     const auth = segments[0] === "auth";
     if (!session && !auth)
       router.replace({ pathname: "/auth", params: { next: pathname } });
-  }, [session, loading, segments, pathname]);
+  }, [session, loading, error, segments, pathname]);
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener(
       (response) => {
@@ -29,6 +30,12 @@ function Navigation() {
     );
     return () => sub.remove();
   }, []);
+  if (error && !session)
+    return (
+      <Screen>
+        <ErrorBox error={Error(error)} retry={retry} />
+      </Screen>
+    );
   if (loading)
     return (
       <Screen>
@@ -74,14 +81,22 @@ function Navigation() {
     </>
   );
 }
+function AccountQueries() {
+  const { session } = useSession();
+  const [cache] = useState(createAccountCache);
+  const account = session?.user.id ?? null;
+  return (
+    <QueryClientProvider key={account ?? "signed-out"} client={cache(account)}>
+      <Navigation />
+    </QueryClientProvider>
+  );
+}
 export default function Root() {
   return (
     <SafeAreaProvider>
-      <QueryClientProvider client={queryClient}>
-        <SessionProvider>
-          <Navigation />
-        </SessionProvider>
-      </QueryClientProvider>
+      <SessionProvider>
+        <AccountQueries />
+      </SessionProvider>
     </SafeAreaProvider>
   );
 }

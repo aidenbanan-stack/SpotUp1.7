@@ -1,4 +1,5 @@
 import "react-native-url-polyfill/auto";
+import { createBoundedFetch } from "./network";
 import { PROJECT_URL, PROJECT_PUBLISHABLE_KEY } from "./project";
 import { createClient } from "@supabase/supabase-js";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -7,7 +8,8 @@ import * as SecureStore from "expo-secure-store";
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL || PROJECT_URL;
 const key =
   process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || PROJECT_PUBLISHABLE_KEY;
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
+  PROJECT_PUBLISHABLE_KEY;
 export const configured = !!url && !!key;
 // Chunk native sessions to fit SecureStore's per-value limit.
 const secureStorage = {
@@ -39,6 +41,7 @@ export const supabase = createClient(
   url || "https://unconfigured.supabase.co",
   key || "unconfigured",
   {
+    global: { fetch: createBoundedFetch(fetch) },
     auth: {
       storage: Platform.OS === "web" ? AsyncStorage : secureStorage,
       autoRefreshToken: true,
