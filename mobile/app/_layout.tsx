@@ -59,14 +59,6 @@ function Navigation() {
           name="upload"
           options={{ title: "Share your game", presentation: "modal" }}
         />
-        <Stack.Screen
-          name="feed"
-          options={{
-            title: "SpotUp Moments",
-            headerStyle: { backgroundColor: C.dark },
-            headerTintColor: "white",
-          }}
-        />
         <Stack.Screen name="game/[id]" options={{ title: "Game day" }} />
         <Stack.Screen
           name="player/[id]"

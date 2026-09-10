@@ -78,7 +78,7 @@ export default function Game() {
           {formatDate(g.starts_at)} · {g.duration_minutes} min
         </Txt>
         <Row>
-          <Tag color={C.lime}>{g.skill}</Tag>
+          <Tag color={C.blue}>{g.skill}</Tag>
           <Tag>{g.format}</Tag>
         </Row>
       </Card>

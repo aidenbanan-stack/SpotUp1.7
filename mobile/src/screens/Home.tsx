@@ -62,109 +62,77 @@ export default function Home() {
         eyebrow={me?.city || "YOUR SPORTS COMMUNITY"}
         title={`Let’s play${me?.name ? ", " + me.name.split(" ")[0] : ""}.`}
         right={
-          <IconButton
-            name="notifications-outline"
-            label="Notifications"
-            onPress={() => router.push("/notifications")}
-          />
+          <Row>
+            <IconButton
+              name="chatbubbles-outline"
+              label="Friends and messages"
+              onPress={() => router.push("/friends")}
+            />
+            <IconButton
+              name="notifications-outline"
+              label="Notifications"
+              onPress={() => router.push("/notifications")}
+            />
+          </Row>
         }
       />
-      <View
-        style={{
-          backgroundColor: C.dark,
-          borderWidth: 1, borderColor: C.line,
-          borderRadius: 25,
-          padding: 25,
-          gap: 18,
-          overflow: "hidden",
-        }}
-      >
-        <View
-          style={{
-            position: "absolute",
-            right: -50,
-            top: -35,
-            width: 230,
-            height: 230,
-            borderWidth: 2,
-            borderColor: "#28433A",
-            borderRadius: 120,
-          }}
-        />
-        <Tag color={C.lime}>REAL PLAYERS. REAL GAMES.</Tag>
-        <Txt
-          size={32}
-          color="white"
-          bold
-          style={{ maxWidth: 260, letterSpacing: -1 }}
-        >
-          Less watching.{"\n"}More playing.
-        </Txt>
-        <Txt color="#C2D0BE" size={14}>
-          A place, a few players, a reason to show up.
-        </Txt>
-        <Row>
+      <Row>
+        <View style={{ flex: 1 }}>
           <Button
             title="Find a game"
             icon="location-outline"
             onPress={() => router.push("/map")}
           />
-          <Button
-            title="Host"
-            kind="secondary"
-            icon="add"
-            onPress={() => router.push("/create")}
-          />
-        </Row>
-      </View>
-      <Row>
-        {[
-          ["Games played", summary.data?.games ?? 0],
-          ["Participation XP", summary.data?.xp ?? 0],
-          [
-            "Reliability",
-            summary.data?.reliability == null
-              ? "New"
-              : summary.data.reliability + "%",
-          ],
-        ].map(([label, value]) => (
-          <Card key={label} style={{ flex: 1, padding: 12 }}>
-            <Txt size={23} bold>
-              {value}
-            </Txt>
-            <Txt size={10} color={C.muted}>
-              {label}
-            </Txt>
-          </Card>
-        ))}
-      </Row>
-      <Row style={{ flexWrap: "wrap" }}>
+        </View>
         <Button
-          title="Squads"
+          title="Host"
           kind="secondary"
-          icon="people-outline"
-          onPress={() => router.push("/squads")}
-        />
-        <Button
-          title="Compete"
-          kind="secondary"
-          icon="trophy-outline"
-          onPress={() => router.push("/tournaments")}
-        />
-        <Button
-          title="Clips"
-          kind="secondary"
-          icon="play-circle-outline"
-          onPress={() => router.push("/feed")}
-        />
-        <Button
-          title="Search"
-          kind="ghost"
-          icon="search"
-          onPress={() => router.push("/search")}
+          icon="add"
+          onPress={() => router.push("/create")}
         />
       </Row>
-      <Section title="The next game is yours" />
+      {summary.data && (
+        <Card>
+          <Row style={{ justifyContent: "space-between" }}>
+            <Txt bold>
+              Level {summary.data.level} · {summary.data.xp} XP
+            </Txt>
+            <Button
+              title="Progress"
+              kind="ghost"
+              onPress={() => router.push("/progress")}
+            />
+          </Row>
+          <View
+            accessibilityRole="progressbar"
+            accessibilityValue={{
+              min: 0,
+              max: 250,
+              now: summary.data.xp % 250,
+            }}
+            style={{ height: 6, backgroundColor: C.soft, borderRadius: 4 }}
+          >
+            <View
+              style={{
+                height: 6,
+                borderRadius: 4,
+                backgroundColor: C.blue,
+                width: `${((summary.data.xp % 250) / 250) * 100}%`,
+              }}
+            />
+          </View>
+          <Txt size={12} color={C.muted}>
+            {250 - (summary.data.xp % 250)} XP to level {summary.data.level + 1}{" "}
+            · {summary.data.games} games played
+          </Txt>
+          <Txt size={12} color={C.muted}>
+            Earn XP by showing up and playing. Confirmed games build your
+            reliability.
+          </Txt>
+        </Card>
+      )}
+      <ErrorBox error={summary.error} />
+      <Section title="Games near you" />
       <Chips
         items={[{ id: "all", name: "All sports" }, ...SPORTS]}
         value={sport}
@@ -191,23 +159,6 @@ export default function Home() {
               }
             />
           )}
-      <Card>
-        <Row>
-          <Icon name="videocam-outline" />
-          <Txt size={19} bold>
-            More than a highlight
-          </Txt>
-        </Row>
-        <Txt color={C.muted}>
-          Meet the players behind the moments. Discover sports clips, then find
-          somewhere to play together.
-        </Txt>
-        <Button
-          title="Explore the community"
-          kind="secondary"
-          onPress={() => router.push("/feed")}
-        />
-      </Card>
     </Screen>
   );
 }

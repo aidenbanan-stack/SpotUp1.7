@@ -1,33 +1,23 @@
-# SpotUp production checkpoint — 2026-09-09
+# SpotUp update — 2026-09-10
 
-The replacement Expo/React Native app is in `mobile/`. Root `vercel.json` builds its web export. The older Vite source is retained for reference.
+Production project: `spot-up-app`, team `aidens-projects-3cd194a0`, domain https://spotup.vercel.app. The Expo application is in `mobile/`; the root Vercel configuration exports that app for web.
 
-## Live
-- Production: https://spotup.vercel.app
-- Vercel project: spot-up-app, team aidens-projects-3cd194a0.
-- Application commit: 86e3ec5a0fcfdb3c7c20b588f711770b3bee7fb0, published to main.
-- Production deployment: dpl_DJe4Pz5onWzEVKJgLG8BzkN8t374, READY; production domain assignment verified.
-- Supabase project: qzssyfzfrghvmgggzplc.
-- Account-preserving migration applied successfully. All 18 Auth account IDs are unchanged; all 18 have new profiles. Games and squads start empty. Previous app tables remain in a private recovery schema.
-- All public tables have RLS; authenticated users cannot access the legacy schema. Anonymous profile requests are denied and the old grant_xp_once RPC is absent.
+## This update
+- Restored Google OAuth sign-in with account selection, using the same web origin return address as the legacy app. Supabase's public Auth settings confirm Google is enabled. Existing account identities remain intact.
+- Blue accent theme, compact welcome screen, simplified Home with Find/Host and participation progress.
+- Five bottom tabs: Home, Map, Moments, Play, Profile. Play groups My Games, Squads and Tournaments. Moments retains vertical video navigation independently of profile showcases.
+- Friends screen, mutual friend requests, player search and friend-to-friend messages. Direct messages reuse reporting, deletion and moderation. Friendship consent, blocking, session status and rate limits are enforced in PostgreSQL.
+- Progress page explains XP sources, level thresholds and achievement milestones.
+- Browser video picker validates actual file metadata and previews locally; browser video player uses inline native controls and handles autoplay rejection. MP4/MOV/WebM MIME types are retained. Signed playback URLs refresh, and owner-visible moderation status is explicit.
+- Fixed avatar storage policy's ambiguous object-name reference.
 
-## Verified
-- TypeScript, 5 domain tests, and 25 database integration checks passed before publishing.
-- Full migration plus 26 database integration checks passed locally.
-- Web production build succeeded.
-- Browser preview rendered the new sign-in screen; visual inspection completed.
-- Live database authenticated-role player_summary smoke check passed inside a rolled-back transaction.
-- No existing user's password or session was changed.
+## Database
+`friends_and_video_repairs` applied successfully as version `20260910053825`; saved in mobile/supabase/migrations. The CLI migration command was unavailable in this session, so the filename uses the version returned by Supabase migration history. All 18 accounts remain present. The additive update does not reset games or squads.
 
-## Included
-Dark multisport UI, animations and reduced-motion support; browser/native maps; games, profiles, squads, tournaments, chat, short sports videos, separate Skill Showcase, and moderation workflows.
+The account-preserving migration was applied on 2026-09-09. Never reapply that cutover or run the empty-project bootstrap against production. Old data is in the inaccessible `spotup_legacy` recovery schema.
 
-## Remaining verification and configuration
-- Authenticated browser and native-device end-to-end tests remain outstanding.
-- Confirm Auth redirect allowlist for https://spotup.vercel.app/auth/callback and spotup://auth/callback.
-- Google Places secret is not configured; manual venue entry remains available.
-- Push-worker secret and scheduler are not configured. Places, delete-account, and dispatch-push Edge Functions are deployed; unauthenticated requests return 401.
-- Security advisor notes legacy functions in the inaccessible archive, intentional authenticated API/GraphQL visibility protected by policies and function checks, and disabled leaked-password protection.
-- See mobile/FEATURE-STATUS.md for implementation scope and limitations.
+## Verification
+TypeScript, 5 domain tests and 26 database integration checks pass. The new consent and direct-message tests verify outsider denial, recipient-only acceptance, blocks and disabled sessions. Web production export passes. Authenticated browser/device end-to-end testing still requires a signed-in session; do not claim a completed Google login or real video upload based solely on a build.
 
-Do not reapply the account-preserving migration or run the empty-project bootstrap on this live project.
+## Remaining operations
+Videos require moderator review before other players see them. No automatic video inspection service has been configured. Google Places and push worker secrets/scheduling remain unconfigured. Native OAuth redirect allowlisting and native device QA remain outstanding.

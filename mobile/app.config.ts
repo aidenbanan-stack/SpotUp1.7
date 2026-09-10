@@ -16,7 +16,7 @@ const config: ExpoConfig = {
     package: "app.spotup.mobile",
     adaptiveIcon: {
       foregroundImage: "./assets/spotup-icon.png",
-      backgroundColor: "#D5F45B",
+      backgroundColor: "#65ADFF",
     },
   },
   web: {
@@ -45,7 +45,7 @@ const config: ExpoConfig = {
           "Find games near you or choose a game venue. Your live location is never published.",
       },
     ],
-    ["expo-notifications", { color: "#152E22" }],
+    ["expo-notifications", { color: "#214E80" }],
     [
       "react-native-maps",
       {

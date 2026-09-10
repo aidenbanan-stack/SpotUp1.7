@@ -50,8 +50,12 @@ if (process.env.TEST_UPGRADE) {
   `);
 }
 const files = process.env.TEST_UPGRADE
-  ? ["../../deployment/supabase/migrations/20260909045448_preserve_accounts_rebuild.sql"]
-  : readdirSync("supabase/migrations").filter(f => f.endsWith(".sql")).sort();
+  ? [
+      "../../deployment/supabase/migrations/20260909045448_preserve_accounts_rebuild.sql",
+    ]
+  : readdirSync("supabase/migrations")
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
 for (const file of files) {
   const sql = readFileSync("supabase/migrations/" + file, "utf8").replace(
     "create extension if not exists pgcrypto;",
@@ -632,14 +636,110 @@ await check(
     ]);
   },
 );
-if (process.env.TEST_UPGRADE) await check("upgrade preserves registered identity and locks the old API", async () => {
-  await owner();
-  assert.equal((await query("select name from profiles where id='11111111-1111-4111-8111-111111111111'")).rows[0].name, "Existing player");
-  assert.equal((await query("select count(*)::int as n from auth.users where id='11111111-1111-4111-8111-111111111111'")).rows[0].n,1);
-  await as(host);
-  await reject("select * from spotup_legacy.profiles", [], /permission denied/);
-  await reject("select spotup_legacy.is_admin($1)", [host], /permission denied/);
-});
+if (process.env.TEST_UPGRADE)
+  await check(
+    "upgrade preserves registered identity and locks the old API",
+    async () => {
+      await owner();
+      assert.equal(
+        (
+          await query(
+            "select name from profiles where id='11111111-1111-4111-8111-111111111111'",
+          )
+        ).rows[0].name,
+        "Existing player",
+      );
+      assert.equal(
+        (
+          await query(
+            "select count(*)::int as n from auth.users where id='11111111-1111-4111-8111-111111111111'",
+          )
+        ).rows[0].n,
+        1,
+      );
+      await as(host);
+      await reject(
+        "select * from spotup_legacy.profiles",
+        [],
+        /permission denied/,
+      );
+      await reject(
+        "select spotup_legacy.is_admin($1)",
+        [host],
+        /permission denied/,
+      );
+    },
+  );
+if (!process.env.TEST_UPGRADE)
+  await check(
+    "friend requests require recipient consent and direct messages stay private",
+    async () => {
+      await owner();
+      await query("delete from blocks");
+      await as(host);
+      await reject(
+        "select send_direct_message($1,'Hello')",
+        [p4],
+        /friend request/,
+      );
+      await query("select friend_action('request',$1)", [p4]);
+      await reject(
+        "select friend_action('accept',$1)",
+        [p4],
+        /Request unavailable/,
+      );
+      await as(p2);
+      assert.equal((await query("select * from friendships")).rows.length, 0);
+      await reject(
+        "insert into friendships(requester_id,recipient_id,state) values($1,$2,'accepted')",
+        [p2, host],
+        /permission denied/,
+      );
+      await as(p4);
+      await query("select friend_action('accept',$1)", [host]);
+      await query("select send_direct_message($1,'Next game?')", [host]);
+      await as(host);
+      assert.equal(
+        (await query("select * from messages where recipient_id=$1", [host]))
+          .rows.length,
+        1,
+      );
+      await as(p2);
+      assert.equal(
+        (await query("select * from messages where recipient_id=$1", [host]))
+          .rows.length,
+        0,
+      );
+      await as(host);
+      await query("select social_action('block',$1)", [p4]);
+      await as(p4);
+      await reject(
+        "select send_direct_message($1,'Blocked message')",
+        [host],
+        /friend request/,
+      );
+      assert.equal(
+        (await query("select * from messages where recipient_id=$1", [host]))
+          .rows.length,
+        0,
+      );
+      await owner();
+      await query("delete from blocks");
+      await as(host);
+      await query("select friend_action('remove',$1)", [p4]);
+      await reject(
+        "select send_direct_message($1,'Removed message')",
+        [p4],
+        /friend request/,
+      );
+      await as(p5);
+      await reject(
+        "select friend_action('request',$1)",
+        [host],
+        /active account/,
+      );
+    },
+  );
 console.log(
   `\n${passed} database integration checks passed against PostgreSQL (PGlite).`,
 );

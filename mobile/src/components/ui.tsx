@@ -1,5 +1,8 @@
 import React from "react";
-import Animated, { FadeInDown, useReducedMotion } from "react-native-reanimated";
+import Animated, {
+  FadeInDown,
+  useReducedMotion,
+} from "react-native-reanimated";
 import {
   View,
   Text,
@@ -21,7 +24,7 @@ export const C = {
   ink: "#F4F7FB",
   muted: "#9AA8BA",
   line: "#263140",
-  lime: "#B9F95B",
+  blue: "#65ADFF",
   dark: "#0D151D",
   soft: "#1C2935",
   red: "#FF8C86",
@@ -119,7 +122,16 @@ export function Card({
   style?: ViewStyle;
 }) {
   const reduced = useReducedMotion();
-  return <Animated.View entering={reduced ? undefined : FadeInDown.duration(260).springify().damping(22)} style={[s.card, style]}>{children}</Animated.View>;
+  return (
+    <Animated.View
+      entering={
+        reduced ? undefined : FadeInDown.duration(260).springify().damping(22)
+      }
+      style={[s.card, style]}
+    >
+      {children}
+    </Animated.View>
+  );
 }
 export function Header({
   eyebrow,
@@ -183,7 +195,7 @@ export function Button({
         {
           backgroundColor:
             kind === "primary"
-              ? C.lime
+              ? C.blue
               : kind === "secondary"
                 ? C.soft
                 : kind === "danger"
@@ -201,11 +213,19 @@ export function Button({
           <Icon
             name={icon}
             size={19}
-            color={kind === "danger" ? C.red : kind === "primary" ? "#101A0A" : C.ink}
+            color={
+              kind === "danger" ? C.red : kind === "primary" ? "#071729" : C.ink
+            }
           />
         )
       )}
-      <Txt size={14} bold color={kind === "danger" ? C.red : kind === "primary" ? "#101A0A" : C.ink}>
+      <Txt
+        size={14}
+        bold
+        color={
+          kind === "danger" ? C.red : kind === "primary" ? "#071729" : C.ink
+        }
+      >
         {title}
       </Txt>
     </Pressable>
@@ -274,12 +294,12 @@ export function Chips({
           style={[
             s.chip,
             {
-              backgroundColor: value === x.id ? C.lime : C.card,
-              borderColor: value === x.id ? C.lime : C.line,
+              backgroundColor: value === x.id ? C.blue : C.card,
+              borderColor: value === x.id ? C.blue : C.line,
             },
           ]}
         >
-          <Txt size={12} bold color={value === x.id ? "#101A0A" : C.muted}>
+          <Txt size={12} bold color={value === x.id ? "#071729" : C.muted}>
             {x.name}
           </Txt>
         </Pressable>
@@ -304,7 +324,7 @@ export function Tag({
         alignSelf: "flex-start",
       }}
     >
-      <Txt size={10} bold color={color === C.lime ? "#101A0A" : C.ink}>
+      <Txt size={10} bold color={color === C.blue ? "#071729" : C.ink}>
         {children}
       </Txt>
     </View>
@@ -356,7 +376,7 @@ export function ErrorBox({
 export function Loading() {
   return (
     <View style={{ padding: 40 }}>
-      <ActivityIndicator color={C.lime} />
+      <ActivityIndicator color={C.blue} />
       <Txt color={C.muted} style={{ textAlign: "center", marginTop: 12 }}>
         Getting things ready…
       </Txt>

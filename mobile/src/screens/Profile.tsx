@@ -1,3 +1,4 @@
+import { FriendButton } from "./Friends";
 import React, { useState } from "react";
 import { View, Pressable, Share } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
@@ -142,13 +143,17 @@ export default function Profile() {
       />
       <Card style={{ backgroundColor: C.dark, padding: 25 }}>
         <Row>
-          <ProfilePhoto name={p.name} path={p.avatar_url || p.legacy_avatar_url} size={72} />
+          <ProfilePhoto
+            name={p.name}
+            path={p.avatar_url || p.legacy_avatar_url}
+            size={72}
+          />
           <View style={{ flex: 1 }}>
             <Txt size={25} bold color="white">
               {p.name}
             </Txt>
-            <Txt color="#C3D2BC">{p.city || "Finding their community"}</Txt>
-            <Txt size={12} color={C.lime}>
+            <Txt color="#B4C6DD">{p.city || "Finding their community"}</Txt>
+            <Txt size={12} color={C.blue}>
               LEVEL {st?.level ?? 1} · {st?.followers ?? 0} followers
             </Txt>
           </View>
@@ -158,23 +163,23 @@ export default function Profile() {
         </Txt>
         <Row style={{ flexWrap: "wrap" }}>
           {p.sports.map((s) => (
-            <Tag key={s} color={C.lime}>
+            <Tag key={s} color={C.blue}>
               {s.toUpperCase()}
             </Tag>
           ))}
         </Row>
         <View
-          style={{ height: 5, backgroundColor: "#40543D", borderRadius: 3 }}
+          style={{ height: 5, backgroundColor: "#253B55", borderRadius: 3 }}
         >
           <View
             style={{
               height: 5,
-              backgroundColor: C.lime,
+              backgroundColor: C.blue,
               width: `${(((st?.xp ?? 0) % 250) / 250) * 100}%`,
             }}
           />
         </View>
-        <Txt size={11} color="#C3D2BC">
+        <Txt size={11} color="#B4C6DD">
           {st?.xp ?? 0} XP · {250 - ((st?.xp ?? 0) % 250)} to the next level
         </Txt>
       </Card>
@@ -214,6 +219,15 @@ export default function Profile() {
           />
         </Row>
       )}
+      {!own && <FriendButton playerId={id} />}
+      {own && (
+        <Button
+          title="Friends & messages"
+          kind="secondary"
+          icon="chatbubbles-outline"
+          onPress={() => router.push("/friends")}
+        />
+      )}
       <Button
         title="Share player profile"
         kind="ghost"
@@ -239,7 +253,7 @@ export default function Profile() {
       {(tab === "overview" || tab === "showcase") && (
         <>
           <Section title="Skill Showcase" />
-          <Card style={{ backgroundColor: "#E8EEDA" }}>
+          <Card style={{ backgroundColor: "#13283F" }}>
             <Row>
               <Icon name="ribbon-outline" />
               <Txt bold>Let your game speak</Txt>
@@ -421,7 +435,7 @@ function ClipCard({
         >
           <Icon
             name={kind === "showcase" ? "ribbon-outline" : "play-outline"}
-            color={kind === "showcase" ? C.lime : C.dark}
+            color={kind === "showcase" ? C.blue : C.dark}
           />
         </View>
         <View style={{ flex: 1, gap: 5 }}>
@@ -434,7 +448,13 @@ function ClipCard({
           <Txt size={10} color={C.muted}>
             {formatDate(clip.created_at)}
           </Txt>
-          <Tag>{clip.media_assets.state.toUpperCase()}</Tag>
+          <Tag>
+            {clip.media_assets?.state === "ready"
+              ? "PUBLISHED"
+              : clip.media_assets?.state === "pending"
+                ? "IN REVIEW · VISIBLE TO YOU"
+                : (clip.media_assets?.state || "unavailable").toUpperCase()}
+          </Tag>
         </View>
       </Row>
       <Button

@@ -19,7 +19,7 @@ import {
 import { useSession, useMe } from "../lib/session";
 import { rows, rpc, supabase } from "../lib/supabase";
 import { useAction, useRealtime } from "../lib/hooks";
-import { formatDate } from "../lib/domain";
+import { achievements, formatDate } from "../lib/domain";
 import { Game, Profile, Summary } from "../lib/types";
 export function Notifications() {
   const { session } = useSession();
@@ -49,7 +49,7 @@ export function Notifications() {
       {q.isLoading && <Loading />}
       {q.data?.map((n) => (
         <Card key={n.id}>
-          {!n.read_at && <Tag color={C.lime}>NEW</Tag>}
+          {!n.read_at && <Tag color={C.blue}>NEW</Tag>}
           <Txt bold>{n.title}</Txt>
           <Txt>{n.body}</Txt>
           <Button
@@ -198,7 +198,7 @@ export function Progress() {
     <Screen>
       <Header eyebrow="EARNED BY SHOWING UP" title="Your progress" />
       <Card style={{ backgroundColor: C.dark }}>
-        <Txt size={42} bold color={C.lime}>
+        <Txt size={42} bold color={C.blue}>
           {summary.data?.xp ?? 0} XP
         </Txt>
         <Txt color="white">
@@ -206,6 +206,35 @@ export function Progress() {
           confirmed games
         </Txt>
       </Card>
+      <Card>
+        <Txt bold>Your next level</Txt>
+        <Txt color={C.muted}>
+          {250 - ((summary.data?.xp ?? 0) % 250)} XP to level{" "}
+          {(summary.data?.level ?? 1) + 1}. Each level takes 250 participation
+          XP.
+        </Txt>
+        <Txt size={13}>Play a confirmed game · +20 XP</Txt>
+        <Txt size={13}>Verified playing time · +5 XP per 30 minutes</Txt>
+        <Txt size={13}>
+          Recognize another player · +15 XP (up to 40 per game)
+        </Txt>
+      </Card>
+      <Section title="Your milestones" />
+      {achievements(
+        summary.data?.games ?? 0,
+        summary.data?.reliability ?? null,
+        summary.data?.xp ?? 0,
+      ).map((a) => (
+        <Card key={a.name}>
+          <Tag color={a.earned ? C.blue : C.soft}>
+            {a.earned ? "EARNED" : "NEXT UP"}
+          </Tag>
+          <Txt bold>{a.name}</Txt>
+          <Txt size={12} color={C.muted}>
+            {a.detail}
+          </Txt>
+        </Card>
+      ))}
       <Card>
         <Txt bold>Daily consistency bonus · +5 XP</Txt>
         <Txt color={C.muted}>

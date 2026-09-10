@@ -6,7 +6,7 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: C.lime,
+        tabBarActiveTintColor: C.blue,
         tabBarInactiveTintColor: C.muted,
         tabBarStyle: {
           backgroundColor: C.bg,
@@ -21,7 +21,8 @@ export default function TabLayout() {
       {[
         { name: "index", title: "Home", icon: "home-outline" },
         { name: "map", title: "Map", icon: "map-outline" },
-        { name: "my-games", title: "My Games", icon: "people-outline" },
+        { name: "feed", title: "Moments", icon: "play-circle-outline" },
+        { name: "play", title: "Play", icon: "trophy-outline" },
         { name: "profile", title: "Profile", icon: "person-outline" },
       ].map((t) => (
         <Tabs.Screen
@@ -29,10 +30,17 @@ export default function TabLayout() {
           name={t.name}
           options={{
             title: t.title,
-            tabBarIcon: ({ color, focused }) => <Icon name={focused ? t.icon.replace("-outline", "") : t.icon} color={color} size={focused ? 25 : 23} />,
+            tabBarIcon: ({ color, focused }) => (
+              <Icon
+                name={focused ? t.icon.replace("-outline", "") : t.icon}
+                color={color}
+                size={focused ? 25 : 23}
+              />
+            ),
           }}
         />
       ))}
+      <Tabs.Screen name="my-games" options={{ href: null }} />
     </Tabs>
   );
 }

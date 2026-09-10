@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Platform } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Linking from "expo-linking";
@@ -15,12 +15,17 @@ import {
   Txt,
 } from "../components/ui";
 import { configured, supabase } from "../lib/supabase";
+import { useSession } from "../lib/session";
 export default function Auth() {
   const { next } = useLocalSearchParams<{ next?: string }>();
   const destination =
     next && /^\/(game|player|clip|squad|tournament)\/[0-9a-f-]+$/i.test(next)
       ? next
       : "/";
+  const { session } = useSession();
+  useEffect(() => {
+    if (session) router.replace(destination as never);
+  }, [session, destination]);
   const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,6 +33,30 @@ export default function Auth() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const [notice, setNotice] = useState("");
+  async function google() {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const redirectTo = Platform.OS === "web" ? window.location.origin : Linking.createURL("/auth/callback");
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo,
+          skipBrowserRedirect: true,
+          queryParams: { prompt: "select_account" },
+        },
+      });
+      if (error) throw error;
+      if (!data.url)
+        throw Error("Google sign-in could not start. Please try again.");
+      if (Platform.OS === "web") window.location.assign(data.url);
+      else await Linking.openURL(data.url);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function submit() {
     setBusy(true);
     setError(undefined);
@@ -79,7 +108,7 @@ export default function Auth() {
       <Row style={{ justifyContent: "space-between" }}>
         <Row>
           <View
-            style={{ backgroundColor: C.lime, padding: 10, borderRadius: 14 }}
+            style={{ backgroundColor: C.blue, padding: 10, borderRadius: 14 }}
           >
             <Icon name="locate" size={25} />
           </View>
@@ -90,67 +119,14 @@ export default function Auth() {
         </Row>
         <Tag>FIND YOUR GAME</Tag>
       </Row>
-      <View
-        style={{
-          backgroundColor: C.dark,
-          borderRadius: 28,
-          padding: 28,
-          gap: 20,
-          overflow: "hidden",
-          minHeight: 275,
-        }}
-      >
-        <View
-          style={{
-            position: "absolute",
-            right: -75,
-            top: 25,
-            width: 260,
-            height: 260,
-            borderWidth: 2,
-            borderColor: "#28433A",
-            borderRadius: 130,
-          }}
-        />
-        <View
-          style={{
-            position: "absolute",
-            right: -30,
-            top: 92,
-            width: 180,
-            height: 120,
-            borderWidth: 2,
-            borderColor: "#28433A",
-            borderRadius: 8,
-          }}
-        />
-        <Tag color={C.lime}>LESS SCROLLING. MORE PLAYING.</Tag>
-        <Txt
-          size={46}
-          color="white"
-          bold
-          style={{ letterSpacing: -2, maxWidth: 320 }}
-        >
-          Find your people.{"\n"}Play your game.
+      <View style={{ paddingVertical: 12, gap: 8 }}>
+        <Txt size={34} bold>
+          Find your people. Play your game.
         </Txt>
-        <Txt color="#BECDBC" size={14} style={{ maxWidth: 310 }}>
-          Find pickup games, build your squad, and make showing up your thing.
+        <Txt color={C.muted}>
+          Your games, your squad, your sports community.
         </Txt>
       </View>
-      <Row style={{ justifyContent: "space-between" }}>
-        {[
-          ["people-outline", "Find games"],
-          ["people-outline", "Build a squad"],
-          ["flash-outline", "Earn your rep"],
-        ].map(([icon, label]) => (
-          <View key={label} style={{ alignItems: "center", gap: 8 }}>
-            <Icon name={icon} />
-            <Txt size={11} bold>
-              {label}
-            </Txt>
-          </View>
-        ))}
-      </Row>
       {!configured && (
         <Card>
           <Txt bold>Ready for your community</Txt>
@@ -175,6 +151,20 @@ export default function Auth() {
           onChangeText={setName}
           autoComplete="name"
         />
+      )}
+      {mode !== "reset" && (
+        <>
+          <Button
+            title="Continue with Google"
+            icon="logo-google"
+            kind="secondary"
+            loading={busy}
+            onPress={google}
+          />
+          <Txt size={12} color={C.muted} style={{ textAlign: "center" }}>
+            or continue with email
+          </Txt>
+        </>
       )}
       <Field
         label="Email"

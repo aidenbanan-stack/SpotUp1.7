@@ -36,7 +36,7 @@ export default function GameCard({ game }: { game: Game }) {
               {game.sport_id.toUpperCase()} · {game.format}
             </Txt>
           </Row>
-          <Tag color={label === "Filling up" ? C.lime : C.soft}>
+          <Tag color={label === "Filling up" ? C.blue : C.soft}>
             {label.toUpperCase()}
           </Tag>
         </Row>
@@ -67,7 +67,7 @@ export default function GameCard({ game }: { game: Game }) {
             style={{
               height: 4,
               borderRadius: 3,
-              backgroundColor: C.lime,
+              backgroundColor: C.blue,
               width: `${Math.min(100, (count / game.capacity) * 100)}%`,
             }}
           />

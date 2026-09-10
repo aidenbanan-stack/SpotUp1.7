@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import React, { useEffect, useState } from "react";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
@@ -24,7 +25,10 @@ export default function Callback() {
         const parsed = new URL(url);
         const params = new URLSearchParams(parsed.hash.replace(/^#/, ""));
         const code = parsed.searchParams.get("code");
-        if (code) {
+        if (Platform.OS === "web") {
+          const { error } = await supabase.auth.getSession();
+          if (error) throw error;
+        } else if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
         } else if (params.get("access_token")) {
@@ -40,7 +44,13 @@ export default function Callback() {
           params.get("type") === "recovery" ||
           parsed.searchParams.get("type") === "recovery";
         setRecovery(r);
+        const { data } = await supabase.auth.getSession();
+        if (!data.session)
+          throw Error(
+            "Sign-in could not be completed. Return to sign in and try again.",
+          );
         setReady(true);
+        if (!r) router.replace("/");
       } catch (e) {
         setError(e);
       }
@@ -63,6 +73,12 @@ export default function Callback() {
     <Screen>
       <Header title={recovery ? "Reset your password" : "Welcome to SpotUp"} />
       <ErrorBox error={error} />
+      {!!error && (
+        <Button
+          title="Back to sign in"
+          onPress={() => router.replace("/auth")}
+        />
+      )}
       {ready && recovery ? (
         <>
           <Field

@@ -41,7 +41,7 @@ export default function Video({
     <View
       style={{
         flex: 1,
-        backgroundColor: "#07160C",
+        backgroundColor: "#080F19",
         minHeight: 240,
         borderRadius: 18,
         overflow: "hidden",

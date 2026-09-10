@@ -68,11 +68,11 @@ export default function Tournaments() {
     <Screen>
       <Header eyebrow="BRING YOUR BEST" title="Time to compete." />
       <Card style={{ backgroundColor: C.dark }}>
-        <Tag color={C.lime}>SINGLE ELIMINATION</Tag>
+        <Tag color={C.blue}>SINGLE ELIMINATION</Tag>
         <Txt size={28} color="white" bold>
           One bracket.{"\n"}Everything to play for.
         </Txt>
-        <Txt color="#C2D0BE">
+        <Txt color="#B4C6DD">
           Register your squad. Play your way through. Build a shared history.
         </Txt>
         <Button
@@ -312,7 +312,7 @@ function MatchCard({
         <Txt bold>{name(m.team_b)}</Txt>
         <Txt bold>{m.score_b ?? "–"}</Txt>
       </Row>
-      {m.winner_id && <Tag color={C.lime}>WINNER · {name(m.winner_id)}</Tag>}
+      {m.winner_id && <Tag color={C.blue}>WINNER · {name(m.winner_id)}</Tag>}
       {host && m.team_a && m.team_b && !m.winner_id && (
         <>
           <Field

@@ -50,7 +50,8 @@ function FeedItem({
   const url = useQuery({
     queryKey: ["videoUrl", clip.media_id],
     enabled: active,
-    staleTime: 90000,
+    staleTime: 60000,
+    refetchInterval: 90000,
     queryFn: async () => {
       const { data, error } = await supabase.storage
         .from("videos")
@@ -72,7 +73,7 @@ function FeedItem({
           <View
             style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
           >
-            <Icon name="play-circle-outline" color={C.lime} size={50} />
+            <Icon name="play-circle-outline" color={C.blue} size={50} />
           </View>
         )}
         <View
@@ -84,7 +85,7 @@ function FeedItem({
             gap: 8,
           }}
         >
-          <Tag color={C.lime}>
+          <Tag color={C.blue}>
             {clip.category.toUpperCase()} · {clip.sport_id.toUpperCase()}
           </Tag>
         </View>
@@ -99,7 +100,7 @@ function FeedItem({
             <Txt color="white" bold>
               {clip.profiles.name} →
             </Txt>
-            <Txt color="#B8CAB7" size={11}>
+            <Txt color="#B4C6DD" size={11}>
               {clip.reason || "From your sports community"}
             </Txt>
           </View>
@@ -219,7 +220,7 @@ export default function Feed() {
   const { data: me } = useMe();
   const { height } = useWindowDimensions();
   const focused = useIsFocused();
-  const itemHeight = Math.max(550, height - 190);
+  const [itemHeight, setItemHeight] = useState(Math.max(400, height - 260));
   const q = useInfiniteQuery({
     queryKey: ["feed", mode, sport, me?.city],
     initialPageParam: {
@@ -278,10 +279,7 @@ export default function Feed() {
   }).current;
   const clips = q.data?.pages.flatMap((p) => p.clips) ?? [];
   return (
-    <SafeAreaView
-      edges={["top", "bottom"]}
-      style={{ flex: 1, backgroundColor: C.dark }}
-    >
+    <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: C.dark }}>
       <View style={{ padding: 12, gap: 8 }}>
         <Row style={{ justifyContent: "space-between" }}>
           <Txt size={24} bold color="white">
@@ -310,7 +308,10 @@ export default function Feed() {
         <Chips
           items={[{ id: "all", name: "All sports" }, ...SPORTS]}
           value={sport}
-          onChange={setSport}
+          onChange={(value) => {
+            setActive(0);
+            setSport(value);
+          }}
         />
       </View>
       <ErrorBox error={q.error} retry={() => q.refetch()} />
@@ -318,6 +319,10 @@ export default function Feed() {
         <Loading />
       ) : (
         <FlatList
+          style={{ flex: 1 }}
+          onLayout={(e) =>
+            setItemHeight(Math.max(300, e.nativeEvent.layout.height))
+          }
           key={mode + sport}
           data={clips}
           keyExtractor={(c) => c.id}
@@ -406,7 +411,8 @@ export function ClipDetail() {
 function ShowcaseViewer({ clip, active }: { clip: Clip; active: boolean }) {
   const q = useQuery({
     queryKey: ["showcaseUrl", clip.media_id],
-    staleTime: 90000,
+    staleTime: 60000,
+    refetchInterval: 90000,
     queryFn: async () => {
       const { data, error } = await supabase.storage
         .from("videos")
@@ -417,14 +423,14 @@ function ShowcaseViewer({ clip, active }: { clip: Clip; active: boolean }) {
   });
   return (
     <View style={{ flex: 1, padding: 20, gap: 16 }}>
-      <Tag color={C.lime}>SKILL SHOWCASE · {clip.category.toUpperCase()}</Tag>
+      <Tag color={C.blue}>SKILL SHOWCASE · {clip.category.toUpperCase()}</Tag>
       {q.data && <Video uri={q.data} active={active} />}
       <ErrorBox error={q.error} />
       <Txt color="white" bold>
         {clip.profiles.name}
       </Txt>
       <Txt color="white">{clip.caption}</Txt>
-      <Txt size={12} color="#C2D0BE">
+      <Txt size={12} color="#B4C6DD">
         Player-selected evidence. This clip does not determine a skill rating.
       </Txt>
       <Button

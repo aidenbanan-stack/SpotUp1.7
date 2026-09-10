@@ -1,6 +1,8 @@
+import { pickBrowserVideo } from "../lib/videoPicker";
+import Video from "../components/Video";
 import { useSports } from "../lib/sports";
-import React, { useState } from "react";
-import { Platform } from "react-native";
+import React, { useState, useEffect } from "react";
+import { Platform, View } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { File } from "expo-file-system";
@@ -74,9 +76,30 @@ export default function Upload() {
     queryKey: ["uploadTournaments"],
     queryFn: () => rows<Tournament>("tournaments", "*", {}, "starts_at", 30),
   });
+  useEffect(
+    () => () => {
+      if (Platform.OS === "web" && asset?.uri.startsWith("blob:"))
+        URL.revokeObjectURL(asset.uri);
+    },
+    [asset],
+  );
   async function pick(camera: boolean) {
     try {
       setError(undefined);
+      if (Platform.OS === "web") {
+        const chosen = await pickBrowserVideo(camera);
+        if (chosen) {
+          try {
+            validateVideo(chosen.fileSize, chosen.duration);
+          } catch (e) {
+            URL.revokeObjectURL(chosen.uri);
+            throw e;
+          }
+          setAsset(chosen);
+          setUpload(undefined);
+        }
+        return;
+      }
       let result: ImagePicker.ImagePickerResult;
       if (camera) {
         const p = await ImagePicker.requestCameraPermissionsAsync();
@@ -113,17 +136,16 @@ export default function Upload() {
     }
     const bytes =
       Platform.OS === "web"
-        ? await (await fetch(asset.uri)).arrayBuffer()
+        ? asset.file
+          ? await asset.file.arrayBuffer()
+          : await (await fetch(asset.uri)).arrayBuffer()
         : await new File(asset.uri).arrayBuffer();
     validateVideo(bytes.byteLength, asset.duration);
     setStage("Uploading video…");
     const { error } = await supabase.storage
       .from("videos")
       .upload(m.object_path, bytes, {
-        contentType:
-          asset.mimeType === "video/quicktime"
-            ? "video/quicktime"
-            : "video/mp4",
+        contentType: asset.mimeType || "video/mp4",
         upsert: false,
       });
     if (error && !error.message.toLowerCase().includes("already exists"))
@@ -161,7 +183,10 @@ export default function Upload() {
             Your {kind === "showcase" ? "Skill Showcase" : "sports clip"} has
             been uploaded. It will become visible to its audience after review.
           </Txt>
-          <Txt color={C.muted}>You can see its status on your profile.</Txt>
+          <Txt color={C.muted}>
+            You can watch it now on your profile. Other players will see it
+            after moderator approval.
+          </Txt>
           <Button
             title="View my profile"
             onPress={() => router.replace("/profile")}
@@ -201,7 +226,7 @@ export default function Upload() {
           disabled={action.isPending}
         />
         <Txt size={12} color={C.muted}>
-          Up to 90 seconds · 100 MB · MP4 or MOV
+          Up to 90 seconds · 100 MB · MP4, MOV or WebM
         </Txt>
         {asset && (
           <Txt bold>
@@ -212,6 +237,11 @@ export default function Upload() {
           </Txt>
         )}
       </Card>
+      {asset && (
+        <View style={{ height: 300 }}>
+          <Video uri={asset.uri} />
+        </View>
+      )}
       <Chips items={SPORTS} value={sport} onChange={setSport} />
       <Chips
         items={CATEGORIES.map((id) => ({ id, name: id }))}

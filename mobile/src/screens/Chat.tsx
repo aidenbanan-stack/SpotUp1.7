@@ -17,17 +17,18 @@ import {
   Txt,
 } from "../components/ui";
 import { Message } from "../lib/types";
-import { rows, rpc } from "../lib/supabase";
+import { rows, rpc, supabase } from "../lib/supabase";
 import { useAction, useRealtime } from "../lib/hooks";
 import { useSession } from "../lib/session";
 import { formatDate } from "../lib/domain";
 export default function Chat() {
   const { kind, id, title } = useLocalSearchParams<{
-    kind: "game" | "squad" | "tournament";
+    kind: "game" | "squad" | "tournament" | "direct";
     id: string;
     title: string;
   }>();
   const column = {
+    direct: "recipient_id",
     game: "game_id",
     squad: "squad_id",
     tournament: "tournament_id",
@@ -37,24 +38,45 @@ export default function Chat() {
   const q = useQuery({
     queryKey: ["messages", kind, id],
     enabled: !!column,
-    queryFn: () =>
-      rows<Message>("messages", "*,profiles!user_id(*)", { [column]: id }),
+    refetchInterval: kind === "direct" ? 10000 : false,
+    queryFn: async () => {
+      if (kind !== "direct")
+        return rows<Message>("messages", "*,profiles!user_id(*)", {
+          [column]: id,
+        });
+      const uid = session!.user.id;
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*,profiles!user_id(*)")
+        .or(
+          `and(user_id.eq.${uid},recipient_id.eq.${id}),and(user_id.eq.${id},recipient_id.eq.${uid})`,
+        )
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      return data as unknown as Message[];
+    },
   });
   useRealtime("messages", `${column}=eq.${id}`);
   const action = useAction(() =>
-    rpc("send_message", {
-      body: text,
-      gid: kind === "game" ? id : null,
-      sid: kind === "squad" ? id : null,
-      tid: kind === "tournament" ? id : null,
-    }),
+    kind === "direct"
+      ? rpc("send_direct_message", { target: id, body: text })
+      : rpc("send_message", {
+          body: text,
+          gid: kind === "game" ? id : null,
+          sid: kind === "squad" ? id : null,
+          tid: kind === "tournament" ? id : null,
+        }),
   );
   const del = useAction((target: string) =>
     rpc("social_action", { action: "delete_message", target }),
   );
   return (
     <Screen refresh={() => q.refetch()} refreshing={q.isRefetching}>
-      <Header eyebrow={`${kind} CHAT`} title={title || "Team talk"} />
+      <Header
+        eyebrow={`${kind} CHAT`}
+        title={title || (kind === "direct" ? "Friend chat" : "Team talk")}
+      />
       <Txt size={12} color={C.muted}>
         Coordinate the game. Be helpful. Keep it respectful.
       </Txt>
@@ -112,7 +134,7 @@ export default function Chat() {
         onChangeText={setText}
         multiline
         maxLength={2000}
-        placeholder="Who’s bringing a ball?"
+        placeholder="Plan your next game…"
       />
       <Button
         title="Send message"
