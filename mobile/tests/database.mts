@@ -78,6 +78,12 @@ for (const [i, id] of [host, p2, p3, p4, p5].entries())
     id,
     { name: "Player " + (i + 1) },
   ]);
+if (
+  (await query("select to_regclass('public.user_entitlements') as t")).rows[0].t
+)
+  await query("insert into user_entitlements(user_id,is_pro) values($1,true)", [
+    host,
+  ]);
 const payload = {
   title: "Integration test hoops",
   sport_id: "basketball",
@@ -740,6 +746,168 @@ if (!process.env.TEST_UPGRADE)
       );
     },
   );
+if (
+  (await query("select to_regclass('public.user_entitlements') as t")).rows[0].t
+) {
+  await check(
+    "Pro gates cannot be bypassed through direct game creation",
+    async () => {
+      await owner();
+      await query("update profiles set disabled=false where id=$1", [p5]);
+      await query("delete from blocks");
+      await as(p2);
+      await reject(
+        "select create_game($1)",
+        [{ ...payload, visibility: "private" }],
+        /Pro/,
+      );
+      await reject(
+        "insert into user_entitlements(user_id,is_pro) values($1,true)",
+        [p2],
+        /permission/,
+      );
+      await reject("select admin_set_pro($1,true)", [p2], /Admin/);
+      await reject(
+        "select schedule_games($1,$2)",
+        [payload, [new Date(Date.now() + 86400000 * 8).toISOString()]],
+        /Pro/,
+      );
+    },
+  );
+  await check(
+    "Recurring Pro sessions preserve local dates and keep separate rosters",
+    async () => {
+      await owner();
+      await query("update games set created_at=now()-interval '2 hours'");
+      await as(host);
+      const first = (
+        await query("select schedule_games($1,$2) id", [
+          { ...payload, visibility: "private", min_xp: 1000000 },
+          [new Date(Date.now() + 86400000 * 8).toISOString()],
+        ])
+      ).rows[0].id;
+      const series = (
+        await query(
+          "select * from games where recurrence_group_id=(select recurrence_group_id from games where id=$1)",
+          [first],
+        )
+      ).rows;
+      assert.equal(series.length, 2);
+      assert.ok(
+        series.every((g) => g.visibility === "private" && g.min_xp === 1000000),
+      );
+      await query("select game_action($1,'invite',$2)", [first, p4]);
+      await as(p4);
+      await reject("select game_action($1,'join')", [first], /XP/);
+    },
+  );
+  await check(
+    "Fantasy requires opt-in, unique rosters, and next-week lock",
+    async () => {
+      for (const id of [p2, p3, p4]) {
+        await as(id);
+        await query("select fantasy_opt_in(true)");
+      }
+      await as(host);
+      await reject(
+        "select save_fantasy_team('Team',$1)",
+        [[p2, p2, p3]],
+        /different/,
+      );
+      await reject(
+        "select save_fantasy_team('Team',$1)",
+        [[p2, p3, p5]],
+        /opted-in/,
+      );
+      const eid = (
+        await query("select save_fantasy_team('My lineup',$1) id", [
+          [p2, p3, p4],
+        ])
+      ).rows[0].id;
+      assert.equal(
+        (await query("select * from fantasy_roster where entry_id=$1", [eid]))
+          .rows.length,
+        3,
+      );
+      assert.equal(
+        (await query("select * from fantasy_board(1)")).rows[0].points,
+        0,
+      );
+      await reject(
+        "update fantasy_entries set week_start=current_date where id=$1",
+        [eid],
+        /permission/,
+      );
+      await as(p3);
+      await query("select fantasy_opt_in(false)");
+      await as(host);
+      await reject(
+        "select save_fantasy_team('Team',$1)",
+        [[p2, p3, p4]],
+        /opted-in/,
+      );
+      await as("", "anon");
+      await reject("select fantasy_board()", [], /permission/);
+    },
+  );
+}
+if (
+  (await query("select to_regclass('public.squad_requests') as t")).rows[0].t
+) {
+  await check(
+    "squad applications, leadership and bans are enforced on the server",
+    async () => {
+      await owner();
+      await query("delete from squad_members where user_id=$1", [p5]);
+      await query(
+        "insert into xp_transactions(user_id,amount,reason,source) values($1,2000,'test','squad-test') on conflict do nothing",
+        [p5],
+      );
+      await as(host);
+      const sid = (
+        await query("select squad_action('create',null,$1) id", [
+          { name: "Pro club", sport_id: "soccer" },
+        ])
+      ).rows[0].id;
+      await query("select squad_manage($1,'settings',null,$2)", [
+        sid,
+        { join_policy: "approval" },
+      ]);
+      await as(p5);
+      await reject("select squad_action('join',$1)", [sid], /approval/);
+      await reject(
+        "select squad_manage($1,'settings',null,$2)",
+        [sid, { join_policy: "open" }],
+        /leadership/,
+      );
+      await query("select squad_manage($1,'apply')", [sid]);
+      await as(host);
+      await query("select squad_manage($1,'approve',$2)", [sid, p5]);
+      assert.equal(
+        (
+          await query(
+            "select count(*)::int n from squad_members where squad_id=$1 and user_id=$2",
+            [sid, p5],
+          )
+        ).rows[0].n,
+        1,
+      );
+      await query("select squad_manage($1,'ban',$2)", [sid, p5]);
+      await as(p5);
+      await reject("select squad_manage($1,'apply')", [sid], /unavailable/);
+      await as(host);
+      await query("select squad_manage($1,'unban',$2)", [sid, p5]);
+      await query("select squad_manage($1,'invite',$2)", [sid, p5]);
+      await as(p5);
+      await query("select squad_manage($1,'accept')", [sid]);
+      await reject(
+        "select squad_manage($1,'role',$2,$3)",
+        [sid, p5, { role: "captain" }],
+        /leadership/,
+      );
+    },
+  );
+}
 console.log(
   `\n${passed} database integration checks passed against PostgreSQL (PGlite).`,
 );

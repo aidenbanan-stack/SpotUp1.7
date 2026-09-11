@@ -1,3 +1,4 @@
+import { useAccess } from "../lib/access";
 import { useSports } from "../lib/sports";
 import React, { useEffect, useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
@@ -20,6 +21,10 @@ import { one, rpc, track } from "../lib/supabase";
 import { useAction } from "../lib/hooks";
 export default function Create() {
   const SPORTS = useSports();
+  const access = useAccess();
+  const [repeat, setRepeat] = useState("1");
+  const [minXp, setMinXp] = useState("0");
+  const [proOnly, setProOnly] = useState(false);
   const { edit } = useLocalSearchParams<{ edit?: string }>();
   const [title, setTitle] = useState("");
   const [sport, setSport] = useState("other");
@@ -72,6 +77,8 @@ export default function Create() {
       description,
       visibility,
       duration_minutes: Number(duration),
+      min_xp: Number(minXp),
+      pro_only: proOnly,
       ...venue,
     };
     if (edit) {
@@ -79,8 +86,13 @@ export default function Create() {
       return edit;
     }
     if (!venue.venue || !venue.address || !venue.latitude || !venue.longitude)
-      throw Error("Choose a venue with coordinates.");
-    const id = await rpc<string>("create_game", { payload });
+      throw Error("Search for a location and select a matching place.");
+    const repeat_starts = Array.from({ length: Number(repeat) - 1 }, (_, i) => {
+      const d = new Date(starts);
+      d.setDate(d.getDate() + 7 * (i + 1));
+      return d.toISOString();
+    });
+    const id = await rpc<string>("schedule_games", { payload, repeat_starts });
     await track("game_created", id);
     return id;
   });
@@ -142,8 +154,50 @@ export default function Create() {
                   { id: "private", name: "Invited players only" },
                 ]}
                 value={visibility}
-                onChange={setVisibility}
+                onChange={(v) => {
+                  if (v === "private" && !access.data?.is_pro)
+                    router.push("/pro");
+                  else setVisibility(v);
+                }}
               />
+              {access.data?.is_pro ? (
+                <>
+                  <Section title="Your weekly game" />
+                  <Chips
+                    items={[
+                      { id: "1", name: "Once" },
+                      { id: "4", name: "4 weeks" },
+                      { id: "8", name: "8 weeks" },
+                    ]}
+                    value={repeat}
+                    onChange={setRepeat}
+                  />
+                  <Txt size={12} color={C.muted}>
+                    Each session has its own roster and check-in. Players join
+                    the dates that work for them.
+                  </Txt>
+                  <Field
+                    label="Minimum XP to join"
+                    value={minXp}
+                    onChangeText={setMinXp}
+                    keyboardType="number-pad"
+                  />
+                  <Chips
+                    items={[
+                      { id: "all", name: "Everyone" },
+                      { id: "pro", name: "Pro members" },
+                    ]}
+                    value={proOnly ? "pro" : "all"}
+                    onChange={(v) => setProOnly(v === "pro")}
+                  />
+                </>
+              ) : (
+                <Button
+                  title="Explore SpotUp Pro hosting"
+                  kind="secondary"
+                  onPress={() => router.push("/pro")}
+                />
+              )}
             </>
           )}
         </>

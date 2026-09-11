@@ -1,3 +1,7 @@
+# September 11 restoration checkpoint
+
+See [feature restoration audit](docs/FEATURE_RESTORATION.md) for shipped features, verification, and remaining legacy/payment work. Supabase migration 20260911060721 applied; 18 accounts and one active Pro entitlement preserved.
+
 # SpotUp update — 2026-09-10
 
 Production project: `spot-up-app`, team `aidens-projects-3cd194a0`, domain https://spotup.vercel.app. The Expo application is in `mobile/`; the root Vercel configuration exports that app for web.

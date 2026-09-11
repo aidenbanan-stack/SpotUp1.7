@@ -51,7 +51,10 @@ export interface Squad {
   name: string;
   sport_id: Sport;
   description: string;
-  squad_members: { user_id: string; profiles?: Profile }[];
+  join_policy?: string;
+  member_limit?: number;
+  min_xp?: number;
+  squad_members: { user_id: string; profiles?: Profile; role?: string }[];
 }
 export interface Tournament {
   id: string;

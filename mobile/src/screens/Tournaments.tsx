@@ -1,3 +1,4 @@
+import TournamentBudget from "../components/TournamentBudget";
 import { useSports } from "../lib/sports";
 import React, { useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
@@ -104,6 +105,7 @@ export default function Tournaments() {
             onChange={setTeams}
           />
           <VenuePicker value={venue} onChange={setVenue} />
+          <TournamentBudget />
           <Button
             title="Create tournament"
             loading={action.isPending}

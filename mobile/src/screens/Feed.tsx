@@ -7,11 +7,18 @@ import {
   Share,
   useWindowDimensions,
   ViewToken,
+  Modal,
+  ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Linking from "expo-linking";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useIsFocused } from "expo-router";
 import {
   Avatar,
@@ -44,9 +51,42 @@ function FeedItem({
   active: boolean;
 }) {
   const { session } = useSession();
-  const action = useAction((v: { action: string; value?: string }) =>
-    rpc("social_action", { ...v, target: clip.id }),
-  );
+  const [more, setMore] = useState(false);
+  const cache = useQueryClient();
+  const action = useMutation({
+    mutationFn: (v: { action: string }) =>
+      rpc("social_action", { ...v, target: clip.id }),
+    onSuccess: (_data, v) => {
+      const update = (item: Clip) => {
+        if (item.id !== clip.id) return item;
+        const field = v.action === "react" ? "reactions" : "saved_posts";
+        const existing = item[field] ?? [];
+        const uid = session!.user.id;
+        return {
+          ...item,
+          [field]: existing.some((r) => r.user_id === uid)
+            ? existing.filter((r) => r.user_id !== uid)
+            : [...existing, { user_id: uid }],
+        };
+      };
+      cache.setQueriesData<{ pages: { clips: Clip[] }[] }>(
+        { queryKey: ["feed"] },
+        (old) =>
+          old
+            ? {
+                ...old,
+                pages: old.pages.map((p) => ({
+                  ...p,
+                  clips: p.clips.map(update),
+                })),
+              }
+            : old,
+      );
+      cache.setQueryData<Clip>(["clip", clip.id, undefined], (old) =>
+        old ? update(old) : old,
+      );
+    },
+  });
   const url = useQuery({
     queryKey: ["videoUrl", clip.media_id],
     enabled: active,
@@ -63,157 +103,258 @@ function FeedItem({
   const liked = clip.reactions?.some((r) => r.user_id === session?.user.id);
   const saved = clip.saved_posts?.some((r) => r.user_id === session?.user.id);
   return (
-    <View style={{ height, padding: 12, gap: 10, backgroundColor: C.dark }}>
-      <View style={{ flex: 1 }}>
+    <View style={{ height, backgroundColor: "#000" }}>
+      <View style={{ position: "absolute", inset: 0 }}>
         {url.data && active ? (
-          <Video uri={url.data} active={active} />
+          <Video uri={url.data} active={active} controls={false} immersive />
         ) : url.isLoading ? (
           <Loading />
         ) : (
           <View
-            style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+            style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
           >
             <Icon name="play-circle-outline" color={C.blue} size={50} />
           </View>
         )}
-        <View
-          style={{
-            position: "absolute",
-            bottom: 16,
-            left: 14,
-            right: 14,
-            gap: 8,
-          }}
-        >
-          <Tag color={C.blue}>
-            {clip.category.toUpperCase()} · {clip.sport_id.toUpperCase()}
-          </Tag>
-        </View>
       </View>
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => router.push(`/player/${clip.creator_id}`)}
+      <View
+        pointerEvents="box-none"
+        style={{
+          position: "absolute",
+          right: 10,
+          bottom: 150,
+          gap: 17,
+          alignItems: "center",
+        }}
       >
-        <Row>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`View ${clip.profiles.name}`}
+          onPress={() => router.push(`/player/${clip.creator_id}`)}
+        >
           <Avatar name={clip.profiles.name} />
-          <View style={{ flex: 1 }}>
-            <Txt color="white" bold>
-              {clip.profiles.name} →
-            </Txt>
-            <Txt color="#B4C6DD" size={11}>
-              {clip.reason || "From your sports community"}
-            </Txt>
-          </View>
-        </Row>
-      </Pressable>
-      <Txt color="white" size={14}>
-        {clip.caption}
-      </Txt>
-      <Row style={{ justifyContent: "space-between" }}>
+        </Pressable>
         <Control
           icon={liked ? "heart" : "heart-outline"}
           label={`Like · ${clip.reactions?.length ?? 0}`}
+          text={String(clip.reactions?.length ?? 0)}
+          selected={liked}
+          disabled={action.isPending}
           onPress={() => action.mutate({ action: "react" })}
         />
         <Control
           icon="chatbubble-outline"
-          label={`Comment · ${clip.comments?.length ?? 0}`}
+          label="Comments"
+          text={String(clip.comments?.length ?? 0)}
           onPress={() =>
             router.push({ pathname: "/comments", params: { id: clip.id } })
           }
         />
         <Control
           icon={saved ? "bookmark" : "bookmark-outline"}
-          label={saved ? "Saved" : "Save"}
+          label={saved ? "Unsave video" : "Save video"}
+          text={saved ? "Saved" : "Save"}
+          selected={saved}
+          disabled={action.isPending}
           onPress={() => action.mutate({ action: "save" })}
         />
         <Control
           icon="share-outline"
-          label="Share"
+          label="Share video"
+          text="Share"
           onPress={() => {
-            Share.share({ message: Linking.createURL("/clip/" + clip.id) });
-            track("post_shared", clip.id);
+            void Share.share({
+              message: Linking.createURL("/clip/" + clip.id),
+            });
+            void track("post_shared", clip.id);
           }}
         />
         <Control
-          icon="flag-outline"
-          label="Report"
-          onPress={() =>
-            router.push({
-              pathname: "/report",
-              params: { kind: "post", id: clip.id },
-            })
-          }
+          icon="ellipsis-horizontal"
+          label="More video options"
+          onPress={() => setMore(true)}
         />
-      </Row>
-      <Row style={{ flexWrap: "wrap" }}>
+      </View>
+      <View
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 75,
+          padding: 18,
+          gap: 8,
+          backgroundColor: "rgba(0,0,0,0.48)",
+          borderTopRightRadius: 18,
+        }}
+      >
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push(`/player/${clip.creator_id}`)}
+        >
+          <Txt color="white" bold size={17}>
+            @{clip.profiles.name}
+          </Txt>
+        </Pressable>
+        <Txt
+          color="white"
+          size={14}
+          style={{ maxHeight: 62, overflow: "hidden" }}
+        >
+          {clip.caption}
+        </Txt>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Find ${clip.sport_id} games`}
+          onPress={() =>
+            router.push({ pathname: "/map", params: { sport: clip.sport_id } })
+          }
+        >
+          <Txt color="#BFDFFF" size={12}>
+            {clip.sport_id} · {clip.category} ›
+          </Txt>
+        </Pressable>
         {clip.game_id && (
           <Button
-            title="View the game"
+            title="Play in this game"
+            kind="secondary"
             onPress={() => {
-              track("content_to_game", clip.id);
+              void track("content_to_game", clip.id);
               router.push(`/game/${clip.game_id}`);
             }}
           />
         )}
-        {clip.squad_id && (
-          <Button
-            title="Meet the squad"
-            kind="secondary"
-            onPress={() => router.push(`/squad/${clip.squad_id}`)}
+        <ErrorBox error={action.error || url.error} />
+      </View>
+      <Modal
+        visible={more}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMore(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            justifyContent: "flex-end",
+            backgroundColor: "rgba(0,0,0,.6)",
+          }}
+        >
+          <Pressable
+            style={{ flex: 1 }}
+            accessibilityRole="button"
+            accessibilityLabel="Close video options"
+            onPress={() => setMore(false)}
           />
-        )}{" "}
-        {clip.tournament_id && (
-          <Button
-            title="Tournament"
-            kind="secondary"
-            onPress={() => router.push(`/tournament/${clip.tournament_id}`)}
-          />
-        )}
-        {clip.location_id && (
-          <Button
-            title="Explore this venue"
-            kind="secondary"
-            onPress={() => router.push(`/venue/${clip.location_id}`)}
-          />
-        )}
-        <Button
-          title={`Find ${clip.sport_id} games`}
-          kind="secondary"
-          onPress={() =>
-            router.push({ pathname: "/map", params: { sport: clip.sport_id } })
-          }
-        />
-      </Row>
-      <ErrorBox error={action.error || url.error} />
+          <View
+            style={{
+              backgroundColor: C.card,
+              padding: 24,
+              gap: 12,
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+            }}
+          >
+            <Txt bold size={20}>
+              From this moment to your next game
+            </Txt>
+            <Button
+              title="Creator profile"
+              kind="secondary"
+              onPress={() => {
+                setMore(false);
+                router.push(`/player/${clip.creator_id}`);
+              }}
+            />
+            {clip.squad_id && (
+              <Button
+                title="Meet the squad"
+                kind="secondary"
+                onPress={() => {
+                  setMore(false);
+                  router.push(`/squad/${clip.squad_id}`);
+                }}
+              />
+            )}
+            {clip.tournament_id && (
+              <Button
+                title="View tournament"
+                kind="secondary"
+                onPress={() => {
+                  setMore(false);
+                  router.push(`/tournament/${clip.tournament_id}`);
+                }}
+              />
+            )}
+            {clip.location_id && (
+              <Button
+                title="Explore this venue"
+                kind="secondary"
+                onPress={() => {
+                  setMore(false);
+                  router.push(`/venue/${clip.location_id}`);
+                }}
+              />
+            )}
+            <Button
+              title="Report video"
+              kind="ghost"
+              onPress={() => {
+                setMore(false);
+                router.push({
+                  pathname: "/report",
+                  params: { kind: "post", id: clip.id },
+                });
+              }}
+            />
+            <Button title="Done" onPress={() => setMore(false)} />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
+
 function Control({
   icon,
   label,
+  text,
   onPress,
+  selected = false,
+  disabled = false,
 }: {
   icon: string;
   label: string;
+  text?: string;
   onPress: () => void;
+  selected?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
       onPress={onPress}
-      style={{ alignItems: "center", gap: 5, minWidth: 48, minHeight: 48 }}
+      style={({ pressed }) => ({
+        alignItems: "center",
+        gap: 3,
+        minWidth: 48,
+        minHeight: 44,
+        opacity: pressed ? 0.6 : 1,
+      })}
     >
-      <Icon name={icon} color="white" size={24} />
-      <Txt color="white" size={10}>
-        {label}
-      </Txt>
+      <Icon name={icon} color={selected ? C.blue : "white"} size={29} />
+      {text && (
+        <Txt color="white" size={11} bold>
+          {text}
+        </Txt>
+      )}
     </Pressable>
   );
 }
 export default function Feed() {
   const SPORTS = useSports();
+  const [filters, setFilters] = useState(false);
   const [mode, setMode] = useState("recommended");
   const [sport, setSport] = useState("all");
   const [active, setActive] = useState(0);
@@ -274,46 +415,132 @@ export default function Feed() {
     },
     getNextPageParam: (last) => last.cursor ?? undefined,
   });
+  const viewability = useRef({ itemVisiblePercentThreshold: 60 }).current;
   const onView = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (viewableItems[0]) setActive(viewableItems[0].index ?? 0);
   }).current;
   const clips = q.data?.pages.flatMap((p) => p.clips) ?? [];
   return (
     <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: C.dark }}>
-      <View style={{ padding: 12, gap: 8 }}>
+      <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
         <Row style={{ justifyContent: "space-between" }}>
-          <Txt size={24} bold color="white">
-            SpotUp Moments
-          </Txt>
-          <Button
-            title="Post"
-            icon="add"
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Feed filters"
+            onPress={() => setFilters(true)}
+            style={{ padding: 10 }}
+          >
+            <Icon name="options-outline" color="white" />
+          </Pressable>
+          <Row>
+            {[
+              { id: "following", name: "Following" },
+              { id: "recommended", name: "For you" },
+            ].map((t) => (
+              <Pressable
+                key={t.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected: mode === t.id }}
+                onPress={() => {
+                  setMode(t.id);
+                  setActive(0);
+                }}
+                style={{
+                  padding: 10,
+                  borderBottomWidth: 2,
+                  borderBottomColor: mode === t.id ? C.blue : "transparent",
+                }}
+              >
+                <Txt color={mode === t.id ? "white" : C.muted} bold size={14}>
+                  {t.name}
+                </Txt>
+              </Pressable>
+            ))}
+          </Row>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Post a moment"
             onPress={() => router.push("/upload")}
-          />
+            style={{ padding: 10 }}
+          >
+            <Icon name="add-circle-outline" color="white" size={28} />
+          </Pressable>
         </Row>
-        <Chips
-          items={[
-            { id: "recommended", name: "For you" },
-            { id: "following", name: "Following" },
-            { id: "local", name: "Local" },
-            { id: "trending", name: "Trending" },
-            { id: "saved", name: "Saved" },
-          ]}
-          value={mode}
-          onChange={(v) => {
-            setActive(0);
-            setMode(v);
-          }}
-        />
-        <Chips
-          items={[{ id: "all", name: "All sports" }, ...SPORTS]}
-          value={sport}
-          onChange={(value) => {
-            setActive(0);
-            setSport(value);
-          }}
-        />
+        {(sport !== "all" || !["following", "recommended"].includes(mode)) && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setFilters(true)}
+          >
+            <Txt color={C.blue} size={11} style={{ textAlign: "center" }}>
+              {mode === "recommended" ? "For you" : mode} ·{" "}
+              {SPORTS.find((s) => s.id === sport)?.name ?? "All sports"} ▾
+            </Txt>
+          </Pressable>
+        )}
       </View>
+      <Modal
+        visible={filters}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setFilters(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            justifyContent: "flex-end",
+            backgroundColor: "rgba(0,0,0,.6)",
+          }}
+        >
+          <Pressable
+            style={{ flex: 1 }}
+            accessibilityRole="button"
+            accessibilityLabel="Close filters"
+            onPress={() => setFilters(false)}
+          />
+          <View
+            style={{
+              maxHeight: "75%",
+              backgroundColor: C.card,
+              padding: 20,
+              gap: 16,
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+            }}
+          >
+            <Txt size={22} bold>
+              Your kind of Moments
+            </Txt>
+            <ScrollView>
+              <View style={{ gap: 16 }}>
+                <Chips
+                  items={[
+                    { id: "recommended", name: "For you" },
+                    { id: "following", name: "Following" },
+                    { id: "local", name: "Local" },
+                    { id: "trending", name: "Trending" },
+                    { id: "saved", name: "Saved" },
+                  ]}
+                  value={mode}
+                  onChange={(v) => {
+                    setMode(v);
+                    setActive(0);
+                  }}
+                />
+                <Txt bold>Sports</Txt>
+                <Chips
+                  items={[{ id: "all", name: "All sports" }, ...SPORTS]}
+                  value={sport}
+                  onChange={(v) => {
+                    setSport(v);
+                    setActive(0);
+                  }}
+                />
+              </View>
+            </ScrollView>
+            <Button title="Show moments" onPress={() => setFilters(false)} />
+          </View>
+        </View>
+      </Modal>
       <ErrorBox error={q.error} retry={() => q.refetch()} />
       {q.isLoading ? (
         <Loading />
@@ -330,14 +557,15 @@ export default function Feed() {
             <FeedItem
               clip={item}
               height={itemHeight}
-              active={index === active && focused}
+              active={index === active && focused && !filters}
             />
           )}
+          showsVerticalScrollIndicator={false}
           pagingEnabled
           snapToInterval={itemHeight}
           decelerationRate="fast"
           onViewableItemsChanged={onView}
-          viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
+          viewabilityConfig={viewability}
           onEndReached={() => {
             if (q.hasNextPage && !q.isFetchingNextPage) q.fetchNextPage();
           }}

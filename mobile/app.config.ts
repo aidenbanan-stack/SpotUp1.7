@@ -1,4 +1,12 @@
 import type { ExpoConfig } from "expo/config";
+if (process.env.VERCEL)
+  console.info(
+    "SpotUp browser place search configured:",
+    Boolean(
+      process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+      process.env.VITE_GOOGLE_MAPS_API_KEY,
+    ),
+  );
 const config: ExpoConfig = {
   name: "SpotUp",
   slug: "spotup",
@@ -54,6 +62,11 @@ const config: ExpoConfig = {
       },
     ],
   ],
-  extra: { eas: { projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID } },
+  extra: {
+    googleMapsWebKey:
+      process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+      process.env.VITE_GOOGLE_MAPS_API_KEY,
+    eas: { projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID },
+  },
 };
 export default config;

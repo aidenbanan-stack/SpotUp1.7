@@ -1,14 +1,22 @@
-import React, { useEffect, useState } from "react";
-import { View, Pressable } from "react-native";
-import * as Location from "expo-location";
-import { Button, Card, C, ErrorBox, Field, Txt } from "./ui";
-import { supabase } from "../lib/supabase";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, View, Pressable } from "react-native";
+import { Card, C, ErrorBox, Field, Icon, Row, Txt } from "./ui";
+import { createPlaceSearch } from "../lib/places";
 export interface VenueInput {
   venue: string;
   address: string;
   latitude: string;
   longitude: string;
+  place_id?: string;
 }
+type Suggestion = {
+  id: string;
+  text: string;
+  name?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+};
 export default function VenuePicker({
   value,
   onChange,
@@ -16,152 +24,149 @@ export default function VenuePicker({
   value: VenueInput;
   onChange: (v: VenueInput) => void;
 }) {
+  const [places] = useState(createPlaceSearch);
   const [search, setSearch] = useState("");
-  const [results, setResults] = useState<{ id: string; text: string }[]>([]);
+  const [results, setResults] = useState<Suggestion[]>([]);
   const [error, setError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
-  const [manual, setManual] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [provider, setProvider] = useState("");
+  const generation = useRef(0);
   useEffect(() => {
-    if (search.length < 3) {
-      setResults([]);
+    const version = ++generation.current;
+    setResults([]);
+    setError(undefined);
+    setSearched(false);
+    if (search.trim().length < 3) {
+      setBusy(false);
       return;
     }
-    let alive = true;
+    setBusy(true);
     const timer = setTimeout(async () => {
       try {
-        const { data, error } = await supabase.functions.invoke("places", {
-          body: { action: "autocomplete", input: search },
-        });
-        if (error)
-          throw Error(
-            "Venue search is unavailable. You can enter the venue manually.",
-          );
-        if (alive) {
-          setResults(data.suggestions);
-          setError(undefined);
-        }
+        const suggestions = await places.search(search.trim());
+        if (version !== generation.current) return;
+        setResults(suggestions);
+        setProvider("Google");
+        setSearched(true);
       } catch (e) {
-        if (alive) setError(e);
+        if (version === generation.current) setError(e);
+      } finally {
+        if (version === generation.current) setBusy(false);
       }
-    }, 400);
+    }, 350);
     return () => {
-      alive = false;
       clearTimeout(timer);
+      generation.current++;
     };
   }, [search]);
-  async function choose(id: string) {
+  async function choose(item: Suggestion) {
+    const version = ++generation.current;
     setBusy(true);
+    setError(undefined);
     try {
-      const { data, error } = await supabase.functions.invoke("places", {
-        body: { action: "details", id },
-      });
-      if (error) throw error;
+      let place = item;
+      if (item.latitude === undefined) {
+        const data = await places.details(item.id);
+        place = { ...item, ...data };
+      }
+      if (version !== generation.current) return;
+      if (
+        !place.name ||
+        !place.address ||
+        !Number.isFinite(place.latitude) ||
+        !Number.isFinite(place.longitude)
+      )
+        throw Error(
+          "This place is missing its address. Please choose another result.",
+        );
       onChange({
-        venue: data.name,
-        address: data.address,
-        latitude: String(data.latitude),
-        longitude: String(data.longitude),
+        venue: place.name,
+        address: place.address,
+        latitude: String(place.latitude),
+        longitude: String(place.longitude),
+        place_id: item.id,
       });
       setSearch("");
       setResults([]);
     } catch (e) {
-      setError(e);
+      if (version === generation.current) setError(e);
     } finally {
-      setBusy(false);
-    }
-  }
-  async function locate() {
-    setBusy(true);
-    try {
-      const p = await Location.requestForegroundPermissionsAsync();
-      if (!p.granted)
-        throw Error(
-          "Location permission was declined. Enter the venue coordinates manually.",
-        );
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      onChange({
-        ...value,
-        latitude: String(loc.coords.latitude),
-        longitude: String(loc.coords.longitude),
-      });
-    } catch (e) {
-      setError(e);
-    } finally {
-      setBusy(false);
+      if (version === generation.current) setBusy(false);
     }
   }
   return (
-    <View style={{ gap: 12 }}>
+    <View style={{ gap: 10 }}>
       <Field
-        label="Find a court, field, or venue"
-        placeholder="Search places and addresses"
+        label="Location"
+        placeholder="Search a park, sports center, or address"
         value={search}
         onChangeText={setSearch}
+        autoCorrect={false}
       />
-      {results.map((r) => (
+      {busy && (
+        <Row>
+          <ActivityIndicator color={C.blue} />
+          <Txt size={12} color={C.muted}>
+            Finding your place…
+          </Txt>
+        </Row>
+      )}
+      {results.map((item) => (
         <Pressable
-          key={r.id}
+          key={item.id}
           accessibilityRole="button"
-          onPress={() => choose(r.id)}
-          style={{ padding: 14, backgroundColor: C.card, borderRadius: 12 }}
+          accessibilityLabel={`Select ${item.text}`}
+          disabled={busy}
+          onPress={() => choose(item)}
+          style={({ pressed }) => ({
+            padding: 14,
+            backgroundColor: pressed ? C.line : C.card,
+            borderRadius: 14,
+          })}
         >
-          <Txt>{r.text}</Txt>
+          <Row>
+            <Icon name="location-outline" color={C.blue} />
+            <View style={{ flex: 1 }}>
+              <Txt bold>{item.name || item.text}</Txt>
+              {!!item.address && (
+                <Txt size={12} color={C.muted}>
+                  {item.address}
+                </Txt>
+              )}
+            </View>
+            <Icon name="chevron-forward" size={16} />
+          </Row>
         </Pressable>
       ))}
       {results.length > 0 && (
         <Txt size={10} color={C.muted}>
-          Powered by Google
+          {provider === "Google"
+            ? "Powered by Google"
+            : "SpotUp community venues"}
+        </Txt>
+      )}
+      {searched && !busy && results.length === 0 && (
+        <Txt size={13} color={C.muted}>
+          No matches yet. Try adding the city or street name.
         </Txt>
       )}
       <ErrorBox error={error} />
-      {value.venue && (
+      {!!value.venue && (
         <Card>
-          <Txt bold>{value.venue}</Txt>
-          <Txt color={C.muted}>{value.address}</Txt>
-        </Card>
-      )}
-      <Button
-        title={manual ? "Hide manual venue details" : "Enter venue manually"}
-        kind="ghost"
-        onPress={() => setManual(!manual)}
-      />
-      {manual && (
-        <>
-          <Field
-            label="Venue name"
-            value={value.venue}
-            onChangeText={(venue) => onChange({ ...value, venue })}
-          />
-          <Field
-            label="Address"
-            value={value.address}
-            onChangeText={(address) => onChange({ ...value, address })}
-          />
-          <Field
-            label="Latitude"
-            keyboardType="numbers-and-punctuation"
-            value={value.latitude}
-            onChangeText={(latitude) => onChange({ ...value, latitude })}
-          />
-          <Field
-            label="Longitude"
-            keyboardType="numbers-and-punctuation"
-            value={value.longitude}
-            onChangeText={(longitude) => onChange({ ...value, longitude })}
-          />
-          <Button
-            title="Use my location for this venue"
-            kind="secondary"
-            loading={busy}
-            onPress={locate}
-          />
+          <Row>
+            <Icon name="checkmark-circle" color={C.blue} />
+            <View style={{ flex: 1 }}>
+              <Txt bold>{value.venue}</Txt>
+              <Txt color={C.muted} size={13}>
+                {value.address}
+              </Txt>
+            </View>
+          </Row>
           <Txt size={12} color={C.muted}>
-            Only use this when you are at the public venue. Your game’s venue
-            will be visible to its audience.
+            Selected meeting place · Search above to change it.
           </Txt>
-        </>
+        </Card>
       )}
     </View>
   );

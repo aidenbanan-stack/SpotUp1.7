@@ -5,12 +5,15 @@ export default function Video({
   uri,
   active = false,
   controls = true,
+  immersive = false,
 }: {
   uri: string;
   active?: boolean;
   controls?: boolean;
+  immersive?: boolean;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
+  const [muted, setMuted] = useState(true);
   const [error, setError] = useState<string>();
   const [blocked, setBlocked] = useState(false);
   useEffect(() => {
@@ -38,7 +41,7 @@ export default function Video({
         flex: 1,
         minHeight: 240,
         backgroundColor: "#080F19",
-        borderRadius: 18,
+        borderRadius: immersive ? 0 : 18,
         overflow: "hidden",
       }}
     >
@@ -46,7 +49,7 @@ export default function Video({
         ref={ref}
         src={uri}
         controls={controls}
-        muted
+        muted={muted}
         playsInline
         loop
         preload="metadata"
@@ -60,11 +63,21 @@ export default function Video({
           width: "100%",
           height: "100%",
           minHeight: 240,
-          objectFit: "contain",
+          objectFit: immersive ? "cover" : "contain",
           position: "absolute",
           inset: 0,
         }}
       />
+      {!controls && (
+        <View style={{ position: "absolute", top: 12, left: 12 }}>
+          <Button
+            title={muted ? "Sound off" : "Sound on"}
+            icon={muted ? "volume-mute-outline" : "volume-high-outline"}
+            kind="secondary"
+            onPress={() => setMuted(!muted)}
+          />
+        </View>
+      )}
       {blocked && (
         <View style={{ position: "absolute", top: "40%", alignSelf: "center" }}>
           <Button

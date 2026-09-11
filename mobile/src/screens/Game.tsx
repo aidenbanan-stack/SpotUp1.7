@@ -1,3 +1,4 @@
+import PlayerSearch from "../components/PlayerSearch";
 import React, { useState } from "react";
 import { View, Share, Linking, Pressable } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
@@ -19,14 +20,13 @@ import {
   Txt,
 } from "../components/ui";
 import { Game as GameType, Summary } from "../lib/types";
-import { one, rpc, track } from "../lib/supabase";
+import { one, rpc, track, supabase } from "../lib/supabase";
 import { useSession } from "../lib/session";
 import { useAction, useRealtime } from "../lib/hooks";
 import { formatDate } from "../lib/domain";
 export default function Game() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session } = useSession();
-  const [invite, setInvite] = useState("");
   const [confirmCancel, setConfirmCancel] = useState(false);
   const q = useQuery({
     queryKey: ["game", id],
@@ -277,18 +277,11 @@ export default function Game() {
                 : setConfirmCancel(true)
             }
           />
-          <Field
-            label="Invite a player by their profile ID"
-            value={invite}
-            onChangeText={setInvite}
-            autoCapitalize="none"
-          />
-          <Button
-            title="Send game invitation"
-            disabled={!invite}
-            loading={action.isPending}
-            kind="secondary"
-            onPress={() => action.mutate({ action: "invite", target: invite })}
+          <PlayerSearch
+            label="Invite players"
+            button="Invite"
+            busy={action.isPending}
+            onSelect={(target) => action.mutate({ action: "invite", target })}
           />
         </Card>
       )}

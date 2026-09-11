@@ -38,3 +38,11 @@ test("stalled requests end with a useful timeout error", async () => {
     /too long to respond/,
   );
 });
+
+import { tournamentBudget } from "../src/lib/tournamentBudget";
+test("tournament estimates conserve cents and reject invalid commissions", () => {
+  const result = tournamentBudget(1999, 7, 333, 777);
+  assert.equal(result.gross, result.platform + result.host + result.remainder);
+  assert.throws(() => tournamentBudget(1000, 8, 7000, 4000));
+  assert.throws(() => tournamentBudget(-1, 8, 500, 500));
+});

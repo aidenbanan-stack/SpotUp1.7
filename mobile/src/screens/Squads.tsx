@@ -1,3 +1,4 @@
+import SquadHub from "../components/SquadHub";
 import { useSports } from "../lib/sports";
 import React, { useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
@@ -45,7 +46,8 @@ export default function Squads() {
           A game is a moment.{"\n"}A squad is your people.
         </Txt>
         <Txt color="#BECDB9">
-          Join at 500 XP. Create at 1,000 XP. Your free plan includes one squad.
+          Join at 500 XP. Create at 1,000 XP. Free includes one squad; Pro
+          includes five.
         </Txt>
         <Button
           title={create ? "Close creation" : "Create a squad"}
@@ -114,6 +116,9 @@ export function SquadDetail() {
   const action = useAction((action: string) =>
     rpc("squad_action", { action, sid: id }),
   );
+  const apply = useAction(() =>
+    rpc("squad_manage", { sid: id, action: "apply" }),
+  );
   const ownership = useAction((target: string | null) =>
     rpc("transfer_squad", { sid: id, target }),
   );
@@ -135,12 +140,25 @@ export function SquadDetail() {
     <Screen>
       <Header eyebrow={s.sport_id} title={s.name} />
       <Txt>{s.description}</Txt>
-      <ErrorBox error={action.error || ownership.error} />
+      <ErrorBox error={action.error || ownership.error || apply.error} />
       <Button
-        title={member ? "Leave squad" : "Join squad · 500 XP required"}
+        title={
+          member
+            ? "Leave squad"
+            : s.join_policy === "approval"
+              ? "Apply to join"
+              : s.join_policy === "invite"
+                ? "Invitation required"
+                : `Join squad · ${s.min_xp ?? 500} XP required`
+        }
+        disabled={!member && s.join_policy === "invite"}
         kind={member ? "ghost" : "primary"}
         loading={action.isPending}
-        onPress={() => action.mutate(member ? "leave" : "join")}
+        onPress={() =>
+          !member && s.join_policy === "approval"
+            ? apply.mutate()
+            : action.mutate(member ? "leave" : "join")
+        }
       />
       {member && (
         <>
@@ -161,6 +179,7 @@ export function SquadDetail() {
           />
         </>
       )}
+      <SquadHub squad={s} />
       <Section title={`${s.squad_members.length} teammates`} />
       {s.squad_members.map((m) => (
         <Card key={m.user_id}>

@@ -74,9 +74,12 @@ export default function Settings({
         : await new File(asset.uri).arrayBuffer();
     if (bytes.byteLength > 5242880) throw Error("Choose a photo under 5 MB.");
     const path = session!.user.id + "/" + Date.now() + ".jpg";
-    const upload = await supabase.storage.from("spotup-avatars").upload(path, bytes, {
-      contentType: asset.mimeType === "image/png" ? "image/png" : "image/jpeg",
-    });
+    const upload = await supabase.storage
+      .from("spotup-avatars")
+      .upload(path, bytes, {
+        contentType:
+          asset.mimeType === "image/png" ? "image/png" : "image/jpeg",
+      });
     if (upload.error) throw upload.error;
     const update = await supabase
       .from("profiles")
@@ -153,11 +156,20 @@ export default function Settings({
     );
   return (
     <Screen>
+      <Button
+        title="SpotUp Pro"
+        icon="sparkles-outline"
+        kind="secondary"
+        onPress={() => router.push("/pro")}
+      />
       <Header
         eyebrow={onboarding ? "WELCOME TO SPOTUP" : "MAKE IT YOURS"}
         title={onboarding ? "What’s your game?" : "Your settings"}
       />
-      <ProfilePhoto name={name || "Player"} path={me?.avatar_url || me?.legacy_avatar_url} />
+      <ProfilePhoto
+        name={name || "Player"}
+        path={me?.avatar_url || me?.legacy_avatar_url}
+      />
       <Button
         title="Choose profile photo"
         kind="secondary"

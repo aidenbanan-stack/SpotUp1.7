@@ -7,10 +7,12 @@ export default function Video({
   uri,
   active = false,
   controls = true,
+  immersive = false,
 }: {
   uri: string;
   active?: boolean;
   controls?: boolean;
+  immersive?: boolean;
 }) {
   const [muted, setMuted] = useState(true);
   const player = useVideoPlayer(uri, (p) => {
@@ -43,14 +45,14 @@ export default function Video({
         flex: 1,
         backgroundColor: "#080F19",
         minHeight: 240,
-        borderRadius: 18,
+        borderRadius: immersive ? 0 : 18,
         overflow: "hidden",
       }}
     >
       <VideoView
         player={player}
         style={{ width: "100%", height: "100%", minHeight: 240 }}
-        contentFit="contain"
+        contentFit={immersive ? "cover" : "contain"}
         nativeControls={controls}
         accessibilityLabel="Sports video"
       />
@@ -69,7 +71,7 @@ export default function Video({
           />
         </View>
       )}
-      <View style={{ position: "absolute", top: 12, right: 12 }}>
+      <View style={{ position: "absolute", top: 12, left: 12 }}>
         <Button
           title={muted ? "Unmute" : "Mute"}
           kind="secondary"
